@@ -1,0 +1,375 @@
+# AUTOCONTROL QR PLATFORM
+
+## Product Blueprint
+
+### Versión 1.0 (MVP)
+
+---
+
+# 1. VISIÓN DEL PRODUCTO
+
+## ¿Qué es AutoControl QR?
+
+AutoControl QR es una plataforma web para administrar el mantenimiento preventivo de vehículos mediante códigos QR inteligentes.
+
+Su objetivo es transformar una simple lectura de kilometraje en decisiones automáticas de mantenimiento, eliminando el uso de papel, recordatorios manuales y hojas de cálculo.
+
+El sistema está diseñado para vehículos individuales y flotas empresariales.
+
+---
+
+# 2. MISIÓN
+
+Permitir que cualquier empresa conozca en tiempo real el estado de mantenimiento de su flota con el mínimo esfuerzo operativo.
+
+---
+
+# 3. FILOSOFÍA DEL PRODUCTO
+
+AutoControl QR se basa en cinco principios:
+
+1. El QR identifica al vehículo.
+2. El kilometraje alimenta todo el sistema.
+3. El plan de mantenimiento define las reglas.
+4. El sistema realiza todos los cálculos.
+5. El usuario solamente registra hechos.
+
+---
+
+# 4. OBJETIVO DEL MVP
+
+Construir una plataforma sencilla, rápida y confiable que permita:
+
+* Registrar vehículos.
+* Generar un QR único por vehículo.
+* Actualizar kilometraje sin iniciar sesión.
+* Administrar planes de mantenimiento.
+* Registrar mantenimientos.
+* Calcular automáticamente los próximos servicios.
+* Mostrar el estado de toda la flota.
+* Generar reportes.
+
+Todo sin agregar funciones que no aporten directamente al control del mantenimiento preventivo.
+
+---
+
+# 5. TIPOS DE USUARIO
+
+## Superadministrador
+
+Administra la plataforma.
+
+Funciones:
+
+* Crear empresas.
+* Administrar licencias.
+* Activar o suspender empresas.
+
+---
+
+## Administrador de empresa
+
+Responsable de la configuración.
+
+Puede:
+
+* Crear vehículos.
+* Crear planes.
+* Crear usuarios.
+* Importar vehículos.
+* Generar QR.
+* Ver reportes.
+
+---
+
+## Jefe de mantenimiento
+
+Puede:
+
+* Consultar Dashboard.
+* Escanear QR.
+* Registrar mantenimientos.
+* Ver reportes.
+* Gestionar la operación diaria.
+
+---
+
+## Técnico
+
+Puede:
+
+* Iniciar sesión.
+* Escanear QR.
+* Registrar servicios.
+* Consultar historial.
+* Ver el plan asignado.
+
+No puede modificar planes ni intervalos.
+
+---
+
+## Usuario público (sin login)
+
+Cualquier persona que escanee el QR podrá:
+
+* Consultar el vehículo.
+* Consultar el kilometraje.
+* Actualizar únicamente el kilometraje.
+
+No tendrá acceso a información administrativa.
+
+---
+
+# 6. MÓDULOS DEL SISTEMA
+
+## Empresas
+
+* Configuración.
+* Logo.
+* Parámetros.
+
+---
+
+## Vehículos
+
+* Crear.
+* Editar.
+* Buscar por placa.
+* Buscar por número interno.
+* Alias opcional.
+* Importar por Excel.
+* Activar/Inactivar.
+
+---
+
+## Código QR
+
+Cada vehículo tendrá un QR único.
+
+El QR nunca cambia.
+
+Puede reimprimirse.
+
+El sticker mostrará:
+
+* Logo de la empresa.
+* Placa.
+* Número interno (si aplica).
+* Código QR.
+
+---
+
+## Planes de mantenimiento
+
+Cada plan contiene:
+
+* Servicios.
+* Intervalos por kilometraje.
+* Intervalos por tiempo.
+* Prealertas.
+* Especificaciones.
+* Versiones.
+
+El técnico no podrá modificar estos parámetros.
+
+---
+
+## Motor de mantenimiento
+
+Calcula automáticamente:
+
+* Próximo mantenimiento.
+* Estado del servicio.
+* Estado del vehículo.
+
+Estados:
+
+* Al día.
+* Próximo.
+* Vencido.
+* Sin historial.
+
+---
+
+## Registro de mantenimiento
+
+Permite:
+
+* Registrar uno o varios servicios.
+* Calcular automáticamente el siguiente mantenimiento.
+* Guardar observaciones.
+* Registrar el técnico responsable.
+
+---
+
+## Historial
+
+Conserva permanentemente:
+
+* Fecha.
+* Kilometraje.
+* Servicio.
+* Técnico.
+* Especificación.
+* Próximo mantenimiento.
+
+Las correcciones quedan auditadas.
+
+---
+
+## Centro de Control
+
+Pantalla principal para el jefe de mantenimiento.
+
+Muestra:
+
+* Vehículos al día.
+* Próximos.
+* Vencidos.
+* Sin historial.
+* Agenda sugerida.
+* Prioridades.
+
+---
+
+## Reportes
+
+Incluye:
+
+* Hoja de vida.
+* Estado de flota.
+* Próximos mantenimientos.
+* Mantenimientos vencidos.
+* Reporte por técnico.
+
+Exportación:
+
+* PDF.
+* Excel.
+
+---
+
+# 7. REGLAS DEL NEGOCIO
+
+## Código QR
+
+* Un QR por vehículo.
+* Nunca cambia.
+* Puede reimprimirse.
+
+---
+
+## Kilometraje
+
+No puede disminuir.
+
+Si aumenta un valor excepcional (configurable por empresa; por defecto 2.000 km), el sistema solicita confirmación y deja registro de la advertencia.
+
+---
+
+## Planes
+
+El técnico nunca modifica:
+
+* Intervalos.
+* Especificaciones.
+* Tipo de aceite.
+
+Los planes se versionan para conservar el historial.
+
+---
+
+## Historial
+
+Nunca se elimina.
+
+Solo pueden realizarse correcciones auditadas.
+
+---
+
+# 8. PRINCIPIOS DE DISEÑO
+
+Cada pantalla tendrá una única acción principal.
+
+Ejemplos:
+
+Conductor:
+
+**Actualizar kilometraje**
+
+Técnico:
+
+**Resolver mantenimiento**
+
+Administrador:
+
+**Crear vehículo**
+
+Jefe:
+
+**Ver Centro de Control**
+
+---
+
+# 9. ALCANCE DE LA V1
+
+Incluye:
+
+* Empresas.
+* Vehículos.
+* QR.
+* Actualización pública de kilometraje.
+* Planes.
+* Mantenimientos.
+* Historial.
+* Dashboard.
+* Reportes.
+* Usuarios.
+* Auditoría.
+
+---
+
+# 10. ROADMAP
+
+## V1
+
+Control del mantenimiento preventivo.
+
+## V1.1
+
+Mejoras derivadas del uso real.
+
+## V2
+
+Inteligencia operativa:
+
+* Predicción de mantenimientos.
+* Agenda automática.
+* Centro Ejecutivo.
+
+## V3
+
+Integraciones:
+
+* WhatsApp.
+* GPS.
+* ERP.
+* APIs.
+* Telemática.
+
+---
+
+# 11. ADN DE AUTOCONTROL QR
+
+AutoControl QR no pretende almacenar información.
+Pretende ayudar a tomar decisiones.
+
+Cada dato ingresado por un usuario debe generar valor automáticamente.
+
+El sistema debe decirle al usuario qué hacer, cuándo hacerlo y sobre qué vehículo actuar.
+
+---
+
+# LEMA DEL PRODUCTO
+
+**"El mantenimiento inteligente comienza con un simple escaneo."**
