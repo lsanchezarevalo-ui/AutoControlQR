@@ -1,0 +1,60 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  role      String
+  createdAt DateTime @default(now())
+}
+
+model Company {
+  id        String   @id @default(uuid())
+  name      String
+  logo      String?
+  createdAt DateTime @default(now())
+  vehicles  Vehicle[]
+}
+
+model Vehicle {
+  id               String   @id
+  plate            String?
+  alias            String?
+  make             String?
+  model            String?
+  year             Int?
+  serviceIntervalKm Int     @default(10000)
+  lastServiceKm    Int      @default(0)
+  company          Company? @relation(fields: [companyId], references: [id])
+  companyId        String?
+  readings         Reading[]
+  services         Service[]
+  createdAt        DateTime @default(now())
+}
+
+model Reading {
+  id         String   @id @default(uuid())
+  vehicle    Vehicle  @relation(fields: [vehicleId], references: [id])
+  vehicleId  String
+  reporterName String?
+  odometerKm Int
+  note       String?
+  createdAt  DateTime @default(now())
+}
+
+model Service {
+  id          String   @id @default(uuid())
+  vehicle     Vehicle  @relation(fields: [vehicleId], references: [id])
+  vehicleId   String
+  type        String
+  performedKm Int
+  performedAt DateTime @default(now())
+  notes       String?
+}
