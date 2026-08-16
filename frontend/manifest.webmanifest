@@ -1,1 +1,1 @@
-{"name":"AutoControl QR","short_name":"AutoControl QR","start_url":"/","display":"standalone","background_color":"#f5f7fa","theme_color":"#062a57","description":"Control inteligente de mantenimiento vehicular"}
+{"name":"AutoControl QR","short_name":"AutoControl QR","start_url":"/","display":"standalone","background_color":"#f5f7fa","theme_color":"#062a57","description":"Control inteligente de mantenimiento vehicular","icons":[{"src":"/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any"}]}

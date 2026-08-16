@@ -3,8 +3,11 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
 using NpgsqlTypes;
@@ -14,8 +17,19 @@ var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Default") ?? throw new InvalidOperationException("Missing DB connection string");
 var jwtKey = builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationException("Missing JWT key");
 var publicWebBaseUrl = builder.Configuration["PublicWebBaseUrl"] ?? "http://localhost:3000";
+var corsOrigin = publicWebBaseUrl.TrimEnd('/');
 
-builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
+builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.WithOrigins(corsOrigin).AllowAnyHeader().AllowAnyMethod()));
+builder.Services.AddRateLimiter(o =>
+{
+    o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    o.AddPolicy("login", ctx => RateLimitPartition.GetFixedWindowLimiter(
+        ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    o.AddPolicy("public", ctx => RateLimitPartition.GetFixedWindowLimiter(
+        ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+});
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(o =>
 {
     o.MapInboundClaims = false;
@@ -32,7 +46,28 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
 builder.Services.AddAuthorization();
 
 var app = builder.Build();
+
+var forwardedHeaderOptions = new ForwardedHeadersOptions { ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto };
+forwardedHeaderOptions.KnownNetworks.Clear();
+forwardedHeaderOptions.KnownProxies.Clear();
+app.UseForwardedHeaders(forwardedHeaderOptions);
+
+app.Use(async (ctx, next) =>
+{
+    try { await next(); }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Unhandled exception on {Path}", ctx.Request.Path);
+        if (!ctx.Response.HasStarted)
+        {
+            ctx.Response.StatusCode = 500;
+            await ctx.Response.WriteAsJsonAsync(new { success = false, error = new { code = "INTERNAL_ERROR", message = "Ocurrió un error inesperado. Intenta nuevamente." } });
+        }
+    }
+});
+
 app.UseCors();
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -67,7 +102,7 @@ app.MapPost("/api/v1/auth/login", async (LoginRequest req) =>
     await using var con = new NpgsqlConnection(connectionString);
     await con.OpenAsync();
     await using var cmd = new NpgsqlCommand("SELECT u.id,u.company_id,u.full_name,u.email,u.password_hash,u.role,u.status,c.status FROM users u JOIN companies c ON c.id=u.company_id WHERE lower(u.email)=lower(@email)", con);
-    cmd.Parameters.AddWithValue("email", req.Email);
+    cmd.Parameters.AddWithValue("email", (req.Email ?? "").Trim());
     await using var r = await cmd.ExecuteReaderAsync();
     if (!await r.ReadAsync() || r.GetString(6) != "ACTIVE" || r.GetString(7)!="ACTIVE") return Results.Unauthorized();
 
@@ -77,7 +112,7 @@ app.MapPost("/api/v1/auth/login", async (LoginRequest req) =>
 
     var accessToken=CreateJwt(user,jwtKey);
     return Results.Ok(new { success = true, data = new { accessToken, user = new { user.Id, user.FullName, user.Email, user.Role, user.CompanyId } } });
-});
+}).RequireRateLimiting("login");
 
 app.MapGet("/api/v1/auth/me", (ClaimsPrincipal principal) => Results.Ok(new { success = true, data = new { userId = principal.FindFirstValue("user_id"), companyId = principal.FindFirstValue("company_id"), name = principal.FindFirstValue("name"), role = principal.FindFirstValue("role") } })).RequireAuthorization();
 
@@ -124,6 +159,8 @@ app.MapPatch("/api/v1/company", async (ClaimsPrincipal principal, UpdateCompanyR
 {
     if(principal.FindFirstValue("role")!="COMPANY_ADMIN")return Results.Forbid();
     if(string.IsNullOrWhiteSpace(req.Name))return Results.BadRequest(new{success=false,error=new{message="El nombre de la empresa es obligatorio."}});
+    if(!string.IsNullOrEmpty(req.LogoDataUrl) && (req.LogoDataUrl.Length>2_000_000 || !System.Text.RegularExpressions.Regex.IsMatch(req.LogoDataUrl,@"^data:image/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$")))
+        return Results.BadRequest(new{success=false,error=new{message="El logo debe ser una imagen válida (PNG, JPG, WEBP o GIF) de tamaño razonable."}});
     await using var con=new NpgsqlConnection(connectionString);await con.OpenAsync();
     await using var cmd=new NpgsqlCommand(@"UPDATE companies SET name=@n,legal_name=@l,tax_id=@t,phone=@p,email=@e,address=@a,logo_data_url=@logo WHERE id=@c",con);
     cmd.Parameters.AddWithValue("n",req.Name.Trim());cmd.Parameters.AddWithValue("l",(object?)req.LegalName?.Trim()??DBNull.Value);cmd.Parameters.AddWithValue("t",(object?)req.TaxId?.Trim()??DBNull.Value);
@@ -145,24 +182,35 @@ app.MapGet("/api/v1/notifications", async (ClaimsPrincipal principal) =>
 {
     if(principal.FindFirstValue("role")!="COMPANY_ADMIN")return Results.Forbid();
     var companyId=CompanyId(principal);await using var con=new NpgsqlConnection(connectionString);await con.OpenAsync();
-    var list=new List<object>();
-    var sql=@"SELECT v.id,v.plate,v.internal_number,s.id,s.name,
-      CASE WHEN (s.interval_km IS NOT NULL AND b.last_service_mileage IS NOT NULL AND v.current_mileage>=b.last_service_mileage+s.interval_km)
-             OR (s.interval_months IS NOT NULL AND b.last_service_date IS NOT NULL AND current_date>=b.last_service_date+(s.interval_months||' months')::interval) THEN 'OVERDUE'
-           WHEN (s.interval_km IS NOT NULL AND b.last_service_mileage IS NOT NULL AND v.current_mileage>=b.last_service_mileage+s.interval_km-COALESCE(s.prealert_km,0))
-             OR (s.interval_months IS NOT NULL AND b.last_service_date IS NOT NULL AND current_date>=b.last_service_date+(s.interval_months||' months')::interval-COALESCE(s.prealert_days,0)*interval '1 day') THEN 'DUE_SOON'
-           ELSE 'UP_TO_DATE' END st,
-      v.current_mileage,
-      CASE WHEN s.interval_km IS NOT NULL AND b.last_service_mileage IS NOT NULL THEN b.last_service_mileage+s.interval_km END next_km,
-      (SELECT max(n.created_at) FROM notification_log n WHERE n.company_id=@c AND n.vehicle_id=v.id AND n.plan_service_id=s.id AND n.status=
-        CASE WHEN (s.interval_km IS NOT NULL AND b.last_service_mileage IS NOT NULL AND v.current_mileage>=b.last_service_mileage+s.interval_km)
-             OR (s.interval_months IS NOT NULL AND b.last_service_date IS NOT NULL AND current_date>=b.last_service_date+(s.interval_months||' months')::interval) THEN 'OVERDUE' ELSE 'DUE_SOON' END) last_sent
+    var sql=@"SELECT v.id,v.plate,v.internal_number,v.current_mileage,s.id,s.name,s.interval_km,s.interval_months,s.prealert_km,s.prealert_days,b.last_service_mileage,b.last_service_date
       FROM vehicles v JOIN vehicle_plan_assignments a ON a.vehicle_id=v.id AND a.active=true
       JOIN maintenance_plan_services s ON s.plan_version_id=a.plan_version_id AND s.active=true
       LEFT JOIN vehicle_service_baselines b ON b.vehicle_id=v.id AND b.plan_service_id=s.id
       WHERE v.company_id=@c AND v.status='ACTIVE'";
-    await using var cmd=new NpgsqlCommand(sql,con);cmd.Parameters.AddWithValue("c",companyId);await using var r=await cmd.ExecuteReaderAsync();
-    while(await r.ReadAsync()){var st=r.GetString(5);if(st=="UP_TO_DATE")continue;list.Add(new{vehicleId=r.GetGuid(0),plate=r.GetString(1),internalNumber=r.IsDBNull(2)?null:r.GetString(2),serviceId=r.GetGuid(3),serviceName=r.GetString(4),status=st,currentMileage=r.GetInt32(6),nextDueMileage=r.IsDBNull(7)?(int?)null:r.GetInt32(7),lastNotifiedAt=r.IsDBNull(8)?(DateTime?)null:r.GetDateTime(8)});}
+    var candidates=new List<(Guid VehicleId,string Plate,string? InternalNumber,int CurrentMileage,MaintenanceStatusItem Item)>();
+    await using(var cmd=new NpgsqlCommand(sql,con))
+    {
+        cmd.Parameters.AddWithValue("c",companyId);await using var r=await cmd.ExecuteReaderAsync();
+        while(await r.ReadAsync())
+        {
+            var currentMileage=r.GetInt32(3);
+            var serviceId=r.GetGuid(4);var name=r.GetString(5);var intervalKm=r.IsDBNull(6)?(int?)null:r.GetInt32(6);var intervalMonths=r.IsDBNull(7)?(int?)null:r.GetInt32(7);var prealertKm=r.IsDBNull(8)?0:r.GetInt32(8);var prealertDays=r.IsDBNull(9)?0:r.GetInt32(9);var lastKm=r.IsDBNull(10)?(int?)null:r.GetInt32(10);var lastDate=r.IsDBNull(11)?(DateTime?)null:r.GetDateTime(11);
+            var item=CalcStatus(serviceId,name,currentMileage,intervalKm,intervalMonths,prealertKm,prealertDays,lastKm,lastDate);
+            if(item.Status=="UP_TO_DATE")continue;
+            candidates.Add((r.GetGuid(0),r.GetString(1),r.IsDBNull(2)?null:r.GetString(2),currentMileage,item));
+        }
+    }
+    var lastSent=new Dictionary<(Guid,Guid,string),DateTime>();
+    await using(var lcmd=new NpgsqlCommand("SELECT vehicle_id,plan_service_id,status,max(created_at) FROM notification_log WHERE company_id=@c GROUP BY vehicle_id,plan_service_id,status",con))
+    {
+        lcmd.Parameters.AddWithValue("c",companyId);await using var lr=await lcmd.ExecuteReaderAsync();
+        while(await lr.ReadAsync())lastSent[(lr.GetGuid(0),lr.IsDBNull(1)?Guid.Empty:lr.GetGuid(1),lr.GetString(2))]=lr.GetDateTime(3);
+    }
+    var list=candidates.Select(x=>new{
+        vehicleId=x.VehicleId,plate=x.Plate,internalNumber=x.InternalNumber,serviceId=x.Item.ServiceId,serviceName=x.Item.Name,status=x.Item.Status,
+        currentMileage=x.CurrentMileage,nextDueMileage=x.Item.NextDueMileage,
+        lastNotifiedAt=lastSent.TryGetValue((x.VehicleId,x.Item.ServiceId,x.Item.Status),out var sent)?sent:(DateTime?)null
+    }).ToList();
     return Results.Ok(new{success=true,data=list});
 }).RequireAuthorization();
 
@@ -423,6 +471,10 @@ app.MapGet("/api/v1/vehicles", async (ClaimsPrincipal principal, string? search)
 app.MapPost("/api/v1/vehicles", async (ClaimsPrincipal principal, CreateVehicleRequest req) =>
 {
     if(principal.FindFirstValue("role")!="COMPANY_ADMIN")return Results.Forbid();
+    if(string.IsNullOrWhiteSpace(req.Plate)||string.IsNullOrWhiteSpace(req.Brand)||string.IsNullOrWhiteSpace(req.Model))
+        return Results.BadRequest(new{success=false,error=new{message="Placa, marca y modelo son obligatorios."}});
+    if(req.CurrentMileage<0)
+        return Results.BadRequest(new{success=false,error=new{message="El kilometraje no puede ser negativo."}});
     var companyId = CompanyId(principal); var userId = UserId(principal);
     await using var con = new NpgsqlConnection(connectionString); await con.OpenAsync(); await using var tx = await con.BeginTransactionAsync();
     try
@@ -476,6 +528,8 @@ app.MapGet("/api/v1/maintenance-plans", async (ClaimsPrincipal principal) =>
 app.MapPost("/api/v1/maintenance-plans", async (ClaimsPrincipal principal, CreatePlanRequest req) =>
 {
     if(principal.FindFirstValue("role")!="COMPANY_ADMIN")return Results.Forbid();
+    if(string.IsNullOrWhiteSpace(req.Name)||string.IsNullOrWhiteSpace(req.Brand)||string.IsNullOrWhiteSpace(req.Model))
+        return Results.BadRequest(new{success=false,error=new{message="Nombre, marca y modelo son obligatorios."}});
     var companyId=CompanyId(principal); var userId=UserId(principal);
     await using var con = new NpgsqlConnection(connectionString); await con.OpenAsync(); await using var tx=await con.BeginTransactionAsync();
     try
@@ -525,7 +579,11 @@ app.MapGet("/api/v1/plan-versions/{versionId:guid}/services", async (ClaimsPrinc
 app.MapPost("/api/v1/plan-versions/{versionId:guid}/services", async (ClaimsPrincipal principal, Guid versionId, CreateServiceRequest req) =>
 {
     if(principal.FindFirstValue("role")!="COMPANY_ADMIN")return Results.Forbid();
+    if(string.IsNullOrWhiteSpace(req.Name))return Results.BadRequest(new{success=false,error=new{message="El nombre del servicio es obligatorio."}});
+    if(string.IsNullOrWhiteSpace(req.Category))return Results.BadRequest(new{success=false,error=new{message="La categoría es obligatoria."}});
     if(req.IntervalKm is null && req.IntervalMonths is null) return Results.BadRequest(new{success=false,error=new{message="Debes definir un intervalo por kilometraje o por tiempo."}});
+    if(req.IntervalKm.HasValue && req.IntervalKm.Value<=0)return Results.BadRequest(new{success=false,error=new{message="El intervalo por kilometraje debe ser mayor que cero."}});
+    if(req.PrealertKm.HasValue && req.PrealertKm.Value<0)return Results.BadRequest(new{success=false,error=new{message="La prealerta no puede ser negativa."}});
     var companyId=CompanyId(principal);
     await using var con=new NpgsqlConnection(connectionString);await con.OpenAsync();
     await using(var verify=new NpgsqlCommand(@"SELECT 1 FROM maintenance_plan_versions pv JOIN maintenance_plans p ON p.id=pv.maintenance_plan_id WHERE pv.id=@v AND p.company_id=@c",con))
@@ -575,6 +633,8 @@ app.MapPost("/api/v1/vehicles/{vehicleId:guid}/assign-plan", async (ClaimsPrinci
 app.MapPost("/api/v1/vehicles/{vehicleId:guid}/baselines", async (ClaimsPrincipal principal, Guid vehicleId, BaselineRequest req) =>
 {
     if(principal.FindFirstValue("role")!="COMPANY_ADMIN")return Results.Forbid();
+    if(req.LastServiceMileage.HasValue && req.LastServiceMileage.Value<0)
+        return Results.BadRequest(new{success=false,error=new{message="El kilometraje no puede ser negativo."}});
     var companyId=CompanyId(principal);var userId=UserId(principal);
     await using var con=new NpgsqlConnection(connectionString);await con.OpenAsync();
     var verify=@"SELECT 1 FROM vehicles v JOIN vehicle_plan_assignments a ON a.vehicle_id=v.id AND a.active=true JOIN maintenance_plan_services s ON s.plan_version_id=a.plan_version_id WHERE v.id=@v AND v.company_id=@c AND s.id=@s";
@@ -624,6 +684,8 @@ app.MapPost("/api/v1/vehicles/{vehicleId:guid}/individual-services", async (Clai
     if(principal.FindFirstValue("role")!="COMPANY_ADMIN")return Results.Forbid();
     if(string.IsNullOrWhiteSpace(req.Name))return Results.BadRequest(new{success=false,error=new{message="El nombre del servicio es obligatorio."}});
     if(req.IntervalKm is null && req.IntervalMonths is null)return Results.BadRequest(new{success=false,error=new{message="Debes definir un intervalo por kilometraje o por tiempo."}});
+    if(req.IntervalKm.HasValue && req.IntervalKm.Value<=0)return Results.BadRequest(new{success=false,error=new{message="El intervalo por kilometraje debe ser mayor que cero."}});
+    if(req.PrealertKm.HasValue && req.PrealertKm.Value<0)return Results.BadRequest(new{success=false,error=new{message="La prealerta no puede ser negativa."}});
     var companyId=CompanyId(principal);var userId=UserId(principal);
     await using var con=new NpgsqlConnection(connectionString);await con.OpenAsync();await using var tx=await con.BeginTransactionAsync();
     try
@@ -803,10 +865,16 @@ app.MapPost("/api/v1/vehicles/{vehicleId:guid}/maintenance", async (ClaimsPrinci
     await using var con=new NpgsqlConnection(connectionString);await con.OpenAsync();await using var tx=await con.BeginTransactionAsync();
     try
     {
-        int currentMileage;
-        await using(var vc=new NpgsqlCommand("SELECT current_mileage FROM vehicles WHERE id=@v AND company_id=@c FOR UPDATE",con,tx))
-        {vc.Parameters.AddWithValue("v",vehicleId);vc.Parameters.AddWithValue("c",companyId);var x=await vc.ExecuteScalarAsync();if(x is null){await tx.RollbackAsync();return Results.NotFound();}currentMileage=(int)x;}
+        int currentMileage; int threshold;
+        await using(var vc=new NpgsqlCommand("SELECT v.current_mileage,c.exceptional_mileage_threshold FROM vehicles v JOIN companies c ON c.id=v.company_id WHERE v.id=@v AND v.company_id=@c FOR UPDATE OF v",con,tx))
+        {vc.Parameters.AddWithValue("v",vehicleId);vc.Parameters.AddWithValue("c",companyId);await using var vr=await vc.ExecuteReaderAsync();if(!await vr.ReadAsync()){await tx.RollbackAsync();return Results.NotFound();}currentMileage=vr.GetInt32(0);threshold=vr.GetInt32(1);}
         if(req.Mileage<currentMileage){await tx.RollbackAsync();return Results.UnprocessableEntity(new{success=false,error=new{code="MILEAGE_LOWER_THAN_CURRENT",message=$"El mantenimiento no puede registrarse por debajo del kilometraje actual ({currentMileage:N0} km)."}});}
+        var jump=req.Mileage-currentMileage;
+        if(jump>=threshold && !req.ExceptionConfirmed)
+        {
+            await tx.RollbackAsync();
+            return Results.Ok(new{success=true,data=new{status="CONFIRMATION_REQUIRED",previousMileage=currentMileage,newMileage=req.Mileage,difference=jump,threshold}});
+        }
         var recordId=Guid.NewGuid();
         await using(var h=new NpgsqlCommand("INSERT INTO maintenance_records(id,company_id,vehicle_id,technician_user_id,service_date,mileage,notes) VALUES(@id,@c,@v,@u,@d,@km,@n)",con,tx))
         {h.Parameters.AddWithValue("id",recordId);h.Parameters.AddWithValue("c",companyId);h.Parameters.AddWithValue("v",vehicleId);h.Parameters.AddWithValue("u",userId);h.Parameters.AddWithValue("d",req.ServiceDate.Date);h.Parameters.AddWithValue("km",req.Mileage);h.Parameters.AddWithValue("n",(object?)req.Notes??DBNull.Value);await h.ExecuteNonQueryAsync();}
@@ -972,7 +1040,7 @@ app.MapGet("/api/v1/public/v/{token}", async (string token) =>
     await using var con = new NpgsqlConnection(connectionString); await con.OpenAsync();
     var sql = @"SELECT v.id,v.plate,v.internal_number,v.brand,v.model,v.variant,v.current_mileage,v.mileage_updated_at,c.exceptional_mileage_threshold
                 FROM vehicle_qr_tokens q JOIN vehicles v ON v.id=q.vehicle_id JOIN companies c ON c.id=v.company_id
-                WHERE q.token=@token AND q.status='ACTIVE' AND v.status='ACTIVE'";
+                WHERE q.token=@token AND q.status='ACTIVE' AND v.status='ACTIVE' AND c.status='ACTIVE'";
     Guid vehicleId; string plate,brand,model; string? internalNumber,variant; int currentMileage,threshold; DateTime lastMileageUpdate;
     await using(var cmd = new NpgsqlCommand(sql,con))
     {
@@ -999,7 +1067,7 @@ app.MapGet("/api/v1/public/v/{token}", async (string token) =>
     }
     var overall=services.Count==0?"NO_PLAN":services.Any(x=>x.Status=="OVERDUE")?"OVERDUE":services.Any(x=>x.Status=="DUE_SOON")?"DUE_SOON":services.Any(x=>x.Status=="NO_BASELINE")?"NO_BASELINE":"UP_TO_DATE";
     return Results.Ok(new{success=true,data=new{vehicleId,plate,internalNumber,brand,model,variant,currentMileage,lastMileageUpdate,threshold,overallStatus=overall,services}});
-});
+}).RequireRateLimiting("public");
 
 app.MapGet("/api/v1/vehicles/{vehicleId:guid}/qr-label", async (ClaimsPrincipal principal,Guid vehicleId) =>
 {
@@ -1016,19 +1084,19 @@ app.MapGet("/api/v1/vehicles/{vehicleId:guid}/qr-label", async (ClaimsPrincipal 
 app.MapGet("/api/v1/public/qr/{token}.svg", async (string token) =>
 {
     await using var con = new NpgsqlConnection(connectionString); await con.OpenAsync();
-    await using var cmd = new NpgsqlCommand("SELECT 1 FROM vehicle_qr_tokens q JOIN vehicles v ON v.id=q.vehicle_id WHERE q.token=@token AND q.status='ACTIVE' AND v.status='ACTIVE'", con);
+    await using var cmd = new NpgsqlCommand("SELECT 1 FROM vehicle_qr_tokens q JOIN vehicles v ON v.id=q.vehicle_id JOIN companies c ON c.id=v.company_id WHERE q.token=@token AND q.status='ACTIVE' AND v.status='ACTIVE' AND c.status='ACTIVE'", con);
     cmd.Parameters.AddWithValue("token", token);
     if (await cmd.ExecuteScalarAsync() is null) return Results.NotFound();
     var url = $"{publicWebBaseUrl.TrimEnd('/')}/v/{token}";
     using var gen = new QRCodeGenerator(); using var data = gen.CreateQrCode(url, QRCodeGenerator.ECCLevel.Q); var svgQr = new SvgQRCode(data); var svg = svgQr.GetGraphic(5);
     return Results.Text(svg, "image/svg+xml");
-});
+}).RequireRateLimiting("public");
 
 app.MapPost("/api/v1/public/v/{token}/mileage", async (string token, MileageRequest req) =>
 {
     if(req.Mileage<0)return Results.BadRequest(new{success=false,error=new{code="INVALID_MILEAGE",message="Kilometraje no válido."}});
     await using var con = new NpgsqlConnection(connectionString); await con.OpenAsync(); await using var tx = await con.BeginTransactionAsync();
-    var sql = @"SELECT v.id,v.company_id,v.current_mileage,c.exceptional_mileage_threshold FROM vehicle_qr_tokens q JOIN vehicles v ON v.id=q.vehicle_id JOIN companies c ON c.id=v.company_id WHERE q.token=@token AND q.status='ACTIVE' FOR UPDATE OF v";
+    var sql = @"SELECT v.id,v.company_id,v.current_mileage,c.exceptional_mileage_threshold FROM vehicle_qr_tokens q JOIN vehicles v ON v.id=q.vehicle_id JOIN companies c ON c.id=v.company_id WHERE q.token=@token AND q.status='ACTIVE' AND v.status='ACTIVE' AND c.status='ACTIVE' FOR UPDATE OF v";
     await using var cmd = new NpgsqlCommand(sql,con,tx); cmd.Parameters.AddWithValue("token",token); await using var r=await cmd.ExecuteReaderAsync();
     if(!await r.ReadAsync()){await tx.RollbackAsync(); return Results.NotFound();}
     var vehicleId=r.GetGuid(0); var companyId=r.GetGuid(1); var current=r.GetInt32(2); var threshold=r.GetInt32(3); await r.CloseAsync();
@@ -1039,7 +1107,7 @@ app.MapPost("/api/v1/public/v/{token}/mileage", async (string token, MileageRequ
     await using(var c2=new NpgsqlCommand("UPDATE vehicles SET current_mileage=@km,mileage_updated_at=now(),updated_at=now() WHERE id=@v",con,tx)){c2.Parameters.AddWithValue("km",req.Mileage);c2.Parameters.AddWithValue("v",vehicleId);await c2.ExecuteNonQueryAsync();}
     await using(var c3=new NpgsqlCommand("INSERT INTO audit_logs(company_id,entity_type,entity_id,action,old_values,new_values,source) VALUES(@c,'VEHICLE',@v,'MILEAGE_UPDATE',jsonb_build_object('mileage',@old),jsonb_build_object('mileage',@new),'PUBLIC_QR')",con,tx)){c3.Parameters.AddWithValue("c",companyId);c3.Parameters.AddWithValue("v",vehicleId);c3.Parameters.AddWithValue("old",current);c3.Parameters.AddWithValue("new",req.Mileage);await c3.ExecuteNonQueryAsync();}
     await tx.CommitAsync(); return Results.Ok(new{success=true,data=new{status="UPDATED",previousMileage=current,newMileage=req.Mileage,difference=diff,exceptional}});
-});
+}).RequireRateLimiting("public");
 
 app.MapPatch("/api/v1/vehicles/{vehicleId:guid}", async (ClaimsPrincipal principal, Guid vehicleId, UpdateVehicleRequest req) =>
 {
@@ -1119,7 +1187,7 @@ app.MapPatch("/api/v1/maintenance-plans/{planId:guid}/archive", async (ClaimsPri
 {
  if(principal.FindFirstValue("role")!="COMPANY_ADMIN")return Results.Forbid();
  await using var con=new NpgsqlConnection(connectionString);await con.OpenAsync();
- await using(var chk=new NpgsqlCommand(@"SELECT count(*) FROM vehicle_plan_assignments a JOIN vehicles v ON v.id=a.vehicle_id WHERE a.active=true AND v.status='ACTIVE' AND a.plan_version_id IN (SELECT id FROM maintenance_plan_versions WHERE maintenance_plan_id=@p)",con)){chk.Parameters.AddWithValue("p",planId);var count=Convert.ToInt32(await chk.ExecuteScalarAsync());if(count>0)return Results.Conflict(new{success=false,error=new{message=$"Este plan está asignado a {count} vehículo(s) activo(s). Cambia primero esos vehículos a otro plan."}});}
+ await using(var chk=new NpgsqlCommand(@"SELECT count(*) FROM vehicle_plan_assignments a JOIN vehicles v ON v.id=a.vehicle_id WHERE a.active=true AND v.status='ACTIVE' AND v.company_id=@c AND a.plan_version_id IN (SELECT id FROM maintenance_plan_versions WHERE maintenance_plan_id=@p)",con)){chk.Parameters.AddWithValue("p",planId);chk.Parameters.AddWithValue("c",CompanyId(principal));var count=Convert.ToInt32(await chk.ExecuteScalarAsync());if(count>0)return Results.Conflict(new{success=false,error=new{message=$"Este plan está asignado a {count} vehículo(s) activo(s). Cambia primero esos vehículos a otro plan."}});}
  await using var cmd=new NpgsqlCommand("UPDATE maintenance_plans SET status='ARCHIVED' WHERE id=@p AND company_id=@c AND status='ACTIVE'",con);cmd.Parameters.AddWithValue("p",planId);cmd.Parameters.AddWithValue("c",CompanyId(principal));if(await cmd.ExecuteNonQueryAsync()==0)return Results.NotFound();
  return Results.Ok(new{success=true});
 }).RequireAuthorization();
@@ -1307,7 +1375,7 @@ record CreateServiceRequest(string Name,string Category,string? Specification,in
 record UpdateServiceRequest(string Name,string? Specification,int? IntervalKm,int? IntervalMonths,int? PrealertKm,int? PrealertDays);
 record AssignPlanRequest(Guid PlanVersionId);
 record BaselineRequest(Guid PlanServiceId,int? LastServiceMileage,DateTime? LastServiceDate);
-record RegisterMaintenanceRequest(int Mileage,DateTime ServiceDate,List<Guid> ServiceIds,string? Notes);
+record RegisterMaintenanceRequest(int Mileage,DateTime ServiceDate,List<Guid> ServiceIds,string? Notes,bool ExceptionConfirmed=false);
 record MaintenanceStatusItem(Guid ServiceId,string Name,string Status,int? NextDueMileage,DateTime? NextDueDate,int? RemainingKm,int? RemainingDays);
 
 record DashboardVehicle(Guid Id,string Plate,string? InternalNumber,string Brand,string Model,string? Variant,int CurrentMileage,List<MaintenanceStatusItem> Services);
