@@ -1,6 +1,6 @@
 FROM nginx:1.27-alpine
 COPY index.html /usr/share/nginx/html/index.html
-COPY app.js /usr/share/nginx/html/app.js
+COPY js/ /usr/share/nginx/html/js/
 COPY styles.css /usr/share/nginx/html/styles.css
 COPY icon.svg /usr/share/nginx/html/icon.svg
 COPY manifest.webmanifest /usr/share/nginx/html/manifest.webmanifest
