@@ -7,6 +7,7 @@ function card(x,cls=''){return `<section class="card ${cls}">${x}</section>`}
 async function req(url,opt={}){const headers={...(opt.headers||{})};const hadToken=!!token();if(hadToken)headers.Authorization='Bearer '+token();try{const r=await fetch(url,{...opt,headers,cache:'no-store'});let j={};try{j=await r.json()}catch{}if(r.status===401&&hadToken){localStorage.clear();loginView('La sesión expiró. Vuelve a iniciar sesión.')}return{r,j,networkError:null}}catch(e){return{r:null,j:{},networkError:e}}}
 function uiIcon(type,cls=''){
  const paths={
+  brand:'<rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><path d="M14 16.2l2.4 2.4L21 14"/>',
   dashboard:'<path d="M3 11.5 12 4l9 7.5"/><path d="M5 10.5V20h5v-6h4v6h5v-9.5"/>',
   vehicle:'<path d="M5 17h14l-1-6-2-3H8l-2 3-1 6Z"/><circle cx="7.5" cy="17.5" r="1.5"/><circle cx="16.5" cy="17.5" r="1.5"/><path d="M7 12h10"/>',
   plans:'<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3v4h6V3M9 11h6M9 15h6"/>',
@@ -60,7 +61,7 @@ function dateField(name,label,required=true){
 function wireToday(wrap,name){const b=wrap.querySelector('.todaybtn');if(b)b.onclick=()=>{wrap.querySelector(`[name="${name}"]`).value=todayLocal()}}
 
 function loginView(message=''){
- app.innerHTML=card(`<div class="eyebrow">AUTOCONTROL QR · V31.6</div><h1>Iniciar sesión</h1>${message?`<p class="error">${esc(message)}</p>`:''}<form id="login"><label>Correo<input name="email" type="email" autocomplete="username" placeholder="correo@empresa.com"></label><label>Contraseña<input name="password" type="password" autocomplete="current-password" placeholder="Contraseña"></label><button id="loginBtn">Ingresar</button><button type="button" id="forgotPassword" class="textbtn login-help">¿Olvidaste tu contraseña?</button><div id="forgotInfo" class="login-forgot-info" hidden><strong>Recuperación de acceso</strong><p>Si eres Técnico, solicita el restablecimiento al Administrador de tu empresa. Si eres Administrador de Empresa, contacta al Administrador General de AutoControl QR.</p></div><p id="err" class="error"></p></form>`,'narrow');
+ app.innerHTML=card(`<div class="login-brand"><span class="login-brand-mark">${uiIcon('brand')}</span><span class="eyebrow">AUTOCONTROL QR · V31.6</span></div><h1>Iniciar sesión</h1>${message?`<p class="error">${esc(message)}</p>`:''}<form id="login"><label>Correo<input name="email" type="email" autocomplete="username" placeholder="correo@empresa.com"></label><label>Contraseña<input name="password" type="password" autocomplete="current-password" placeholder="Contraseña"></label><button id="loginBtn">Ingresar</button><button type="button" id="forgotPassword" class="textbtn login-help">¿Olvidaste tu contraseña?</button><div id="forgotInfo" class="login-forgot-info" hidden><strong>Recuperación de acceso</strong><p>Si eres Técnico, solicita el restablecimiento al Administrador de tu empresa. Si eres Administrador de Empresa, contacta al Administrador General de AutoControl QR.</p></div><p id="err" class="error"></p></form>`,'narrow');
  const forgot=document.getElementById('forgotPassword');if(forgot)forgot.onclick=()=>{const box=document.getElementById('forgotInfo');box.hidden=!box.hidden};
  document.getElementById('login').onsubmit=async e=>{e.preventDefault();const btn=document.getElementById('loginBtn');btn.disabled=true;btn.textContent='Ingresando…';const f=new FormData(e.target);const out=await req(api+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:f.get('email'),password:f.get('password')})});if(!out.r||!out.r.ok){document.getElementById('err').textContent='No fue posible iniciar sesión.';btn.disabled=false;btn.textContent='Ingresar';return}localStorage.setItem('token',out.j.data.accessToken);localStorage.setItem('user',JSON.stringify(out.j.data.user));adminShell('dashboard')}
 }
@@ -92,7 +93,7 @@ async function adminShell(view='dashboard'){
   ['reports','reports','Reportes'],['users','users','Usuarios'],['notifications','alert','Notificaciones'],['settings','settings','Empresa']
  ];
  app.innerHTML=`<div class="app-layout"><aside class="sidebar">
-   <div class="sidebar-brand"><div class="sidebar-mark">${uiIcon('vehicle')}</div><div><strong>AUTOCONTROL QR</strong><small>Control de mantenimiento</small></div></div>
+   <div class="sidebar-brand"><div class="sidebar-mark">${uiIcon('brand')}</div><div><strong>AUTOCONTROL QR</strong><small>Control de mantenimiento</small></div></div>
    <nav class="sidebar-nav">${nav.map(x=>`<button data-view="${x[0]}" class="sidebtn ${view===x[0]?'active':''}">${uiIcon(x[1])}<span>${x[2]}</span></button>`).join('')}</nav>
    <div class="sidebar-bottom"><button id="logout" class="sidebtn">${uiIcon('settings')}<span>Salir</span></button><small>v31.6</small></div>
  </aside>
