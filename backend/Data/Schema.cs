@@ -107,7 +107,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_vehicle_specific_plan ON maintenance_plans(
     {
         await using var con=new NpgsqlConnection(cs);await con.OpenAsync();
         Guid companyId;
-        await using(var cmd=new NpgsqlCommand("SELECT id FROM companies WHERE name='Empresa Demo' LIMIT 1",con))
+        await using(var cmd=new NpgsqlCommand("SELECT id FROM companies WHERE code='DEMO' LIMIT 1",con))
         {var x=await cmd.ExecuteScalarAsync();if(x is Guid g) companyId=g;else{companyId=Guid.NewGuid();await using var ins=new NpgsqlCommand("INSERT INTO companies(id,name,code,status) VALUES(@id,'Empresa Demo','DEMO','ACTIVE')",con);ins.Parameters.AddWithValue("id",companyId);await ins.ExecuteNonQueryAsync();}}
         await using(var cmd=new NpgsqlCommand("SELECT 1 FROM users WHERE email='admin@demo.local'",con))
         {if(await cmd.ExecuteScalarAsync() is null){var id=Guid.NewGuid();var demo=new DemoUser(id,companyId,"Administrador Demo","admin@demo.local","","COMPANY_ADMIN");var temp=Environment.GetEnvironmentVariable("AUTOCONTROLQR_DEMO_PASSWORD")??Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(18));Console.WriteLine($"[INITIAL CREDENTIAL] admin@demo.local password: {temp}");var hash=new PasswordHasher<DemoUser>().HashPassword(demo,temp);await using var ins=new NpgsqlCommand("INSERT INTO users(id,company_id,full_name,email,password_hash,role) VALUES(@id,@c,@n,@e,@p,@r)",con);ins.Parameters.AddWithValue("id",id);ins.Parameters.AddWithValue("c",companyId);ins.Parameters.AddWithValue("n",demo.FullName);ins.Parameters.AddWithValue("e",demo.Email);ins.Parameters.AddWithValue("p",hash);ins.Parameters.AddWithValue("r",demo.Role);await ins.ExecuteNonQueryAsync();}}
