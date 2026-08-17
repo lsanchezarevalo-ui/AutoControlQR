@@ -29,20 +29,46 @@ function renderPlansQuickMenu(){
  ]);
  document.querySelectorAll('.quick-menu-item').forEach(b=>b.onclick=()=>adminShell('plans',b.dataset.action));
 }
-function renderPlans(plans,vehicles=[],action=null){
- const main=document.getElementById('main'),catalog=vehicleCatalog(vehicles,plans),isMobile=innerWidth<=800;
- const backLink=(isMobile&&action)?`<button type="button" id="plansBackMenu" class="textbtn quick-menu-back">‹ Volver</button>`:'';
- main.innerHTML=backLink+card(`<div class="top plan-page-head">${moduleTitle('plans','Planes de mantenimiento','Define los servicios y sus intervalos. Un mismo plan puede utilizarse en uno o varios vehículos.')}<button type="button" id="showArchivedPlans" class="secondary mobile-archived-btn">Ver archivados</button></div><div class="plan-create-title"><h2>Nuevo plan</h2><p class="muted">Para un vehículo particular puedes comenzar con un plan sencillo y agregar únicamente los servicios que necesites.</p></div><form id="createPlan" class="plan-create-grid"><label>Nombre del plan<input name="name" placeholder="Ej. Mantenimiento personal" required></label>${catalogFields(catalog,'plan')}<div class="plan-create-action"><button>Crear plan</button></div></form><p id="planerr" class="error"></p>`)+`<div class="plan-list-head"><h2><span id="planCount">${plans.length}</span> plan${plans.length===1?'':'es'} activo${plans.length===1?'':'s'}</h2><div class="plan-search"><input id="planSearch" type="search" placeholder="Buscar plan, marca o modelo" aria-label="Buscar plan, marca o modelo" autocomplete="off"></div></div><div id="planList" class="list plan-list">${plans.length?plans.map(planCard).join(''):'<div class="no-search-results">Todavía no hay planes. Crea el primero arriba.</div>'}</div>`;
- document.getElementById('showArchivedPlans').onclick=()=>showArchivedPlans();
+function planCreateFormFields(catalog){
+ return `<label>Nombre del plan<input name="name" placeholder="Ej. Mantenimiento personal" required></label>${catalogFields(catalog,'plan')}<div class="plan-create-action"><button>Crear plan</button></div>`;
+}
+function wirePlanCreateForm(catalog){
  const form=document.getElementById('createPlan');wireVehicleCatalog(form,catalog,'plan');form.querySelectorAll('.title-case').forEach(titleLive);
  form.onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);const out=await req(api+'/maintenance-plans',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:f.get('name'),brand:titleCaseValue(f.get('brand')),model:titleCaseValue(f.get('model')),variant:null})});if(!out.r||!out.r.ok){document.getElementById('planerr').textContent=out.j.error?.message||'No se pudo crear el plan.';return}adminShell('plans')};
- const wire=()=>{document.querySelectorAll('.editplan').forEach(b=>b.onclick=()=>editPlan(b.dataset.plan,plans,vehicles));document.querySelectorAll('.archiveplan').forEach(b=>b.onclick=()=>archivePlan(b.dataset.plan,b.dataset.name));document.querySelectorAll('.servicebtn').forEach(b=>b.onclick=()=>addService(b.dataset.version,b.dataset.name));document.querySelectorAll('.showservices').forEach(b=>b.onclick=()=>showServices(b.dataset.version,b.dataset.name))};wire();
+}
+function renderPlans(plans,vehicles=[],action=null){
+ const main=document.getElementById('main'),catalog=vehicleCatalog(vehicles,plans),isMobile=innerWidth<=800;
+ const mobileMode=(isMobile&&action)?action:null;
+ const backLink=mobileMode?`<button type="button" id="plansBackMenu" class="textbtn quick-menu-back">‹ Volver</button>`:'';
+
+ if(mobileMode==='create'){
+  main.innerHTML=backLink+card(`${moduleTitle('plans','Nuevo plan','Para un vehículo particular puedes comenzar con un plan sencillo y agregar únicamente los servicios que necesites.')}<form id="createPlan" class="plan-create-grid">${planCreateFormFields(catalog)}</form><p id="planerr" class="error"></p>`);
+  wirePlanCreateForm(catalog);
+  document.getElementById('plansBackMenu').onclick=()=>adminShell('plans');
+  return;
+ }
+
+ const listHeadHtml=`<div class="plan-list-head"><h2><span id="planCount">${plans.length}</span> plan${plans.length===1?'':'es'} activo${plans.length===1?'':'s'}</h2><div class="plan-search"><input id="planSearch" type="search" placeholder="Buscar plan, marca o modelo" aria-label="Buscar plan, marca o modelo" autocomplete="off"></div></div>`;
+ const listHtml=`<div id="planList" class="list plan-list">${plans.length?plans.map(planCard).join(''):'<div class="no-search-results">Todavía no hay planes. Crea el primero arriba.</div>'}</div>`;
+ const wire=()=>{document.querySelectorAll('.editplan').forEach(b=>b.onclick=()=>editPlan(b.dataset.plan,plans,vehicles));document.querySelectorAll('.archiveplan').forEach(b=>b.onclick=()=>archivePlan(b.dataset.plan,b.dataset.name));document.querySelectorAll('.servicebtn').forEach(b=>b.onclick=()=>addService(b.dataset.version,b.dataset.name));document.querySelectorAll('.showservices').forEach(b=>b.onclick=()=>showServices(b.dataset.version,b.dataset.name))};
+
+ if(mobileMode==='search'||mobileMode==='list'){
+  main.innerHTML=backLink+card(`<div class="top plan-page-head">${moduleTitle('plans','Planes de mantenimiento','Define los servicios y sus intervalos. Un mismo plan puede utilizarse en uno o varios vehículos.')}<button type="button" id="showArchivedPlans" class="secondary mobile-archived-btn">Ver archivados</button></div>`)+listHeadHtml+listHtml;
+  document.getElementById('showArchivedPlans').onclick=()=>showArchivedPlans();
+  wire();
+  const planSearch=document.getElementById('planSearch');
+  planSearch.oninput=e=>{const q=e.target.value.trim().toLocaleLowerCase('es'),filtered=!q?plans:plans.filter(p=>[p.name,p.brand,p.model].some(x=>String(x||'').toLocaleLowerCase('es').includes(q)));document.getElementById('planCount').textContent=filtered.length;document.getElementById('planList').innerHTML=filtered.length?filtered.map(planCard).join(''):'<div class="no-search-results">No encontramos planes con ese criterio.</div>';wire()};
+  document.getElementById('plansBackMenu').onclick=()=>adminShell('plans');
+  if(mobileMode==='search')planSearch.focus();
+  return;
+ }
+
+ main.innerHTML=card(`<div class="top plan-page-head">${moduleTitle('plans','Planes de mantenimiento','Define los servicios y sus intervalos. Un mismo plan puede utilizarse en uno o varios vehículos.')}<button type="button" id="showArchivedPlans" class="secondary mobile-archived-btn">Ver archivados</button></div><div class="plan-create-title"><h2>Nuevo plan</h2><p class="muted">Para un vehículo particular puedes comenzar con un plan sencillo y agregar únicamente los servicios que necesites.</p></div><form id="createPlan" class="plan-create-grid">${planCreateFormFields(catalog)}</form><p id="planerr" class="error"></p>`)+listHeadHtml+listHtml;
+ document.getElementById('showArchivedPlans').onclick=()=>showArchivedPlans();
+ wirePlanCreateForm(catalog);
+ wire();
  const planSearch=document.getElementById('planSearch');
  planSearch.oninput=e=>{const q=e.target.value.trim().toLocaleLowerCase('es'),filtered=!q?plans:plans.filter(p=>[p.name,p.brand,p.model].some(x=>String(x||'').toLocaleLowerCase('es').includes(q)));document.getElementById('planCount').textContent=filtered.length;document.getElementById('planList').innerHTML=filtered.length?filtered.map(planCard).join(''):'<div class="no-search-results">No encontramos planes con ese criterio.</div>';wire()};
- if(backLink)document.getElementById('plansBackMenu').onclick=()=>adminShell('plans');
- if(isMobile&&action==='search'){planSearch.scrollIntoView({block:'start'});planSearch.focus()}
- else if(isMobile&&action==='create'){document.querySelector('.plan-create-title')?.scrollIntoView({block:'start'})}
- else if(isMobile&&action==='list'){document.getElementById('planList')?.scrollIntoView({block:'start'})}
 }
 function planCard(p){return `<article class="planrow plan-card"><div class="plan-info"><div class="plan-title"><strong>${esc(p.name)}</strong><span class="plan-version">V${p.versionNumber}</span></div><span class="plan-model">${esc(p.brand)} ${esc(p.model)}</span></div><div class="plan-actions"><button class="showservices secondary" data-version="${p.versionId}" data-name="${esc(p.name)}">Servicios</button><button class="servicebtn" data-version="${p.versionId}" data-name="${esc(p.name)}">+ Agregar servicio</button><button class="editplan textbtn" data-plan="${p.id}">Editar</button><button class="archiveplan textbtn dangertext" data-plan="${p.id}" data-name="${esc(p.name)}">Archivar</button></div></article>`}
 
