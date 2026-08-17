@@ -53,7 +53,8 @@ function renderVehicles(vehicles,plans,isAdmin=true,action=null){
   return;
  }
 
- const listHeadHtml=`<div class="vehicle-list-head"><h2><span id="vehicleCount">${vehicles.length}</span> vehículo${vehicles.length===1?'':'s'} activo${vehicles.length===1?'':'s'}</h2><div class="vehicle-search"><input id="vehicleSearch" type="search" placeholder="Buscar por placa o interno" aria-label="Buscar por placa o interno" autocomplete="off"></div></div>`;
+ const searchProminent=mobileMode==='search';
+ const listHeadHtml=`<div class="vehicle-list-head${searchProminent?' vehicle-list-head-searchmode':''}"><h2><span id="vehicleCount">${vehicles.length}</span> vehículo${vehicles.length===1?'':'s'} activo${vehicles.length===1?'':'s'}</h2><div class="vehicle-search${searchProminent?' vehicle-search-prominent':''}">${searchProminent?uiIcon('search'):''}<input id="vehicleSearch" type="search" placeholder="Buscar por placa o interno" aria-label="Buscar por placa o interno" autocomplete="off"></div></div>`;
  const listHtml=`<div id="vehicleList" class="list vehicle-list">${vehicles.map(v=>vehicleCard(v,plans,isAdmin)).join('')}</div>`;
 
  if(mobileMode==='search'||mobileMode==='list'){

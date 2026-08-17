@@ -48,7 +48,8 @@ function renderPlans(plans,vehicles=[],action=null){
   return;
  }
 
- const listHeadHtml=`<div class="plan-list-head"><h2><span id="planCount">${plans.length}</span> plan${plans.length===1?'':'es'} activo${plans.length===1?'':'s'}</h2><div class="plan-search"><input id="planSearch" type="search" placeholder="Buscar plan, marca o modelo" aria-label="Buscar plan, marca o modelo" autocomplete="off"></div></div>`;
+ const searchProminent=mobileMode==='search';
+ const listHeadHtml=`<div class="plan-list-head${searchProminent?' plan-list-head-searchmode':''}"><h2><span id="planCount">${plans.length}</span> plan${plans.length===1?'':'es'} activo${plans.length===1?'':'s'}</h2><div class="plan-search${searchProminent?' vehicle-search-prominent':''}">${searchProminent?uiIcon('search'):''}<input id="planSearch" type="search" placeholder="Buscar plan, marca o modelo" aria-label="Buscar plan, marca o modelo" autocomplete="off"></div></div>`;
  const listHtml=`<div id="planList" class="list plan-list">${plans.length?plans.map(planCard).join(''):'<div class="no-search-results">Todavía no hay planes. Crea el primero arriba.</div>'}</div>`;
  const wire=()=>{document.querySelectorAll('.editplan').forEach(b=>b.onclick=()=>editPlan(b.dataset.plan,plans,vehicles));document.querySelectorAll('.archiveplan').forEach(b=>b.onclick=()=>archivePlan(b.dataset.plan,b.dataset.name));document.querySelectorAll('.servicebtn').forEach(b=>b.onclick=()=>addService(b.dataset.version,b.dataset.name));document.querySelectorAll('.showservices').forEach(b=>b.onclick=()=>showServices(b.dataset.version,b.dataset.name))};
 

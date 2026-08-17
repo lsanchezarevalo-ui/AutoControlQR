@@ -75,6 +75,14 @@
  .reportfilters{gap:4px!important}
 }
 
+/* V32 buscador con más protagonismo al entrar desde "Buscar" en el menú rápido móvil */
+.vehicle-list-head-searchmode,.plan-list-head-searchmode{flex-direction:column;align-items:stretch;gap:10px}
+.vehicle-list-head-searchmode h2,.plan-list-head-searchmode h2{order:2}
+.vehicle-search-prominent{order:1;width:100%!important;display:flex;align-items:center;gap:10px;background:#fff;border:2px solid var(--brand);border-radius:14px;padding:13px 16px;box-shadow:0 6px 18px rgba(37,73,193,.14)}
+.vehicle-search-prominent .ui-icon{width:20px;height:20px;color:var(--brand);flex:0 0 auto}
+.vehicle-search-prominent input{border:0;padding:2px 0;font-size:1.05rem;font-weight:600;flex:1;background:transparent;min-width:0}
+.vehicle-search-prominent input:focus{outline:none}
+
 /* V32 menú rápido móvil (Vehículos / Planes) */
 .quick-menu-head{margin-bottom:16px}
 .quick-menu{display:grid;gap:12px}
