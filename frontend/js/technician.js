@@ -45,14 +45,25 @@ async function clearTechnicianVehicle(){
 }
 async function startQrScanner(){
  const box=document.getElementById('scanner');
- if(!('BarcodeDetector' in window)){box.innerHTML='<p class="warntext">Este navegador no tiene lector QR integrado. Usa la búsqueda por placa/interno o pega el código QR abajo.</p>';return}
+ if(typeof jsQR!=='function'){box.innerHTML='<p class="warntext">No se pudo cargar el lector QR. Usa la búsqueda por placa/interno o pega el código QR abajo.</p>';return}
  let stream;
  try{
   stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});
-  box.innerHTML='<video id="qrvideo" autoplay playsinline></video><p class="muted">Apunta la cámara al QR del vehículo.</p><button id="stopscan" class="secondary">Cancelar cámara</button>';
-  const video=document.getElementById('qrvideo');video.srcObject=stream;const detector=new BarcodeDetector({formats:['qr_code']});let active=true;
+  box.innerHTML='<video id="qrvideo" autoplay playsinline muted></video><p class="muted">Apunta la cámara al QR del vehículo.</p><button id="stopscan" class="secondary">Cancelar cámara</button>';
+  const video=document.getElementById('qrvideo');video.srcObject=stream;let active=true;
+  const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d',{willReadFrequently:true});
   document.getElementById('stopscan').onclick=()=>{active=false;stream.getTracks().forEach(t=>t.stop());box.innerHTML=''};
-  const scan=async()=>{if(!active)return;try{const codes=await detector.detect(video);if(codes.length){active=false;stream.getTracks().forEach(t=>t.stop());return selectTechnicianQr(codes[0].rawValue)}}catch{}requestAnimationFrame(scan)};requestAnimationFrame(scan);
+  const scan=()=>{
+   if(!active)return;
+   if(video.readyState===video.HAVE_ENOUGH_DATA){
+    canvas.width=video.videoWidth;canvas.height=video.videoHeight;
+    ctx.drawImage(video,0,0,canvas.width,canvas.height);
+    const frame=ctx.getImageData(0,0,canvas.width,canvas.height);
+    const code=jsQR(frame.data,frame.width,frame.height,{inversionAttempts:'dontInvert'});
+    if(code&&code.data){active=false;stream.getTracks().forEach(t=>t.stop());return selectTechnicianQr(code.data)}
+   }
+   requestAnimationFrame(scan)
+  };requestAnimationFrame(scan);
  }catch(e){box.innerHTML='<p class="error">No se pudo abrir la cámara. Revisa el permiso del navegador o usa la búsqueda manual.</p>'}
 }
 function technicianVehicleHome(v){
