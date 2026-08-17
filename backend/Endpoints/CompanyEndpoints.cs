@@ -12,10 +12,10 @@ public static class CompanyEndpoints
             if(principal.FindFirstValue("role")!="COMPANY_ADMIN")return Results.Forbid();
             await using var con=new NpgsqlConnection(connectionString);await con.OpenAsync();
             await using var cmd=new NpgsqlCommand(@"SELECT id,name,COALESCE(code,''),status,legal_name,tax_id,phone,email,address,logo_data_url,
-         notification_enabled,notification_internal,notification_email_enabled,notification_email,notification_due_soon,notification_overdue,notification_repeat_days
+         notification_enabled,notification_internal,notification_email_enabled,notification_email,notification_due_soon,notification_overdue,notification_repeat_days,exceptional_mileage_threshold
          FROM companies WHERE id=@c",con);cmd.Parameters.AddWithValue("c",CompanyId(principal));
             await using var r=await cmd.ExecuteReaderAsync();if(!await r.ReadAsync())return Results.NotFound();
-            return Results.Ok(new{success=true,data=new{id=r.GetGuid(0),name=r.GetString(1),code=r.GetString(2),status=r.GetString(3),legalName=r.IsDBNull(4)?null:r.GetString(4),taxId=r.IsDBNull(5)?null:r.GetString(5),phone=r.IsDBNull(6)?null:r.GetString(6),email=r.IsDBNull(7)?null:r.GetString(7),address=r.IsDBNull(8)?null:r.GetString(8),logoDataUrl=r.IsDBNull(9)?null:r.GetString(9),notificationEnabled=r.GetBoolean(10),notificationInternal=r.GetBoolean(11),notificationEmailEnabled=r.GetBoolean(12),notificationEmail=r.IsDBNull(13)?null:r.GetString(13),notificationDueSoon=r.GetBoolean(14),notificationOverdue=r.GetBoolean(15),notificationRepeatDays=r.GetInt32(16)}});
+            return Results.Ok(new{success=true,data=new{id=r.GetGuid(0),name=r.GetString(1),code=r.GetString(2),status=r.GetString(3),legalName=r.IsDBNull(4)?null:r.GetString(4),taxId=r.IsDBNull(5)?null:r.GetString(5),phone=r.IsDBNull(6)?null:r.GetString(6),email=r.IsDBNull(7)?null:r.GetString(7),address=r.IsDBNull(8)?null:r.GetString(8),logoDataUrl=r.IsDBNull(9)?null:r.GetString(9),notificationEnabled=r.GetBoolean(10),notificationInternal=r.GetBoolean(11),notificationEmailEnabled=r.GetBoolean(12),notificationEmail=r.IsDBNull(13)?null:r.GetString(13),notificationDueSoon=r.GetBoolean(14),notificationOverdue=r.GetBoolean(15),notificationRepeatDays=r.GetInt32(16),exceptionalMileageThreshold=r.GetInt32(17)}});
         }).RequireAuthorization();
 
         app.MapPatch("/api/v1/company", async (ClaimsPrincipal principal, UpdateCompanyRequest req) =>
@@ -24,10 +24,12 @@ public static class CompanyEndpoints
             if(string.IsNullOrWhiteSpace(req.Name))return Results.BadRequest(new{success=false,error=new{message="El nombre de la empresa es obligatorio."}});
             if(!string.IsNullOrEmpty(req.LogoDataUrl) && (req.LogoDataUrl.Length>2_000_000 || !System.Text.RegularExpressions.Regex.IsMatch(req.LogoDataUrl,@"^data:image/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$")))
                 return Results.BadRequest(new{success=false,error=new{message="El logo debe ser una imagen válida (PNG, JPG, WEBP o GIF) de tamaño razonable."}});
+            if(req.ExceptionalMileageThreshold<=0)
+                return Results.BadRequest(new{success=false,error=new{message="El umbral de kilometraje excepcional debe ser mayor que cero."}});
             await using var con=new NpgsqlConnection(connectionString);await con.OpenAsync();
-            await using var cmd=new NpgsqlCommand(@"UPDATE companies SET name=@n,legal_name=@l,tax_id=@t,phone=@p,email=@e,address=@a,logo_data_url=@logo WHERE id=@c",con);
+            await using var cmd=new NpgsqlCommand(@"UPDATE companies SET name=@n,legal_name=@l,tax_id=@t,phone=@p,email=@e,address=@a,logo_data_url=@logo,exceptional_mileage_threshold=@emt WHERE id=@c",con);
             cmd.Parameters.AddWithValue("n",req.Name.Trim());cmd.Parameters.AddWithValue("l",(object?)req.LegalName?.Trim()??DBNull.Value);cmd.Parameters.AddWithValue("t",(object?)req.TaxId?.Trim()??DBNull.Value);
-            cmd.Parameters.AddWithValue("p",(object?)req.Phone?.Trim()??DBNull.Value);cmd.Parameters.AddWithValue("e",(object?)req.Email?.Trim()??DBNull.Value);cmd.Parameters.AddWithValue("a",(object?)req.Address?.Trim()??DBNull.Value);cmd.Parameters.AddWithValue("logo",(object?)req.LogoDataUrl??DBNull.Value);cmd.Parameters.AddWithValue("c",CompanyId(principal));
+            cmd.Parameters.AddWithValue("p",(object?)req.Phone?.Trim()??DBNull.Value);cmd.Parameters.AddWithValue("e",(object?)req.Email?.Trim()??DBNull.Value);cmd.Parameters.AddWithValue("a",(object?)req.Address?.Trim()??DBNull.Value);cmd.Parameters.AddWithValue("logo",(object?)req.LogoDataUrl??DBNull.Value);cmd.Parameters.AddWithValue("emt",req.ExceptionalMileageThreshold);cmd.Parameters.AddWithValue("c",CompanyId(principal));
             await cmd.ExecuteNonQueryAsync();return Results.Ok(new{success=true});
          }).RequireAuthorization();
 

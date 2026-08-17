@@ -62,12 +62,27 @@ async function loadBaseline(vehicleId,serviceId){
 
 async function mileageHistory(vehicleId){
  const out=await req(`${api}/vehicles/${vehicleId}/mileage-history`);if(!out.r||!out.r.ok)return alert('No se pudo cargar el historial de kilometraje.');
- const rows=out.j.data||[];
- document.getElementById('main').innerHTML=card(`<button id="back" class="secondary">← Volver</button><div class="dashboard-head"><div><h1>Historial de kilometraje</h1><p class="muted">Las lecturas del QR conservan su fecha y hora automáticas.</p></div><button id="addhistorical">+ Cargar lectura histórica</button></div>${rows.length?`<div class="historylist">${rows.map(x=>`<article class="historyrow"><div><strong>${fmt(x.mileage)} km</strong><span>${new Date(x.createdAt).toLocaleString('es-CO')}</span><small>${esc(sourceLabel(x.source))}${x.isExceptional?' · 🟠 Lectura excepcional':''}</small></div></article>`).join('')}</div>`:'<p class="muted">No hay lecturas todavía.</p>'}`);
+ const rows=out.j.data||[];const current=rows[0]?.mileage??0;
+ document.getElementById('main').innerHTML=card(`<button id="back" class="secondary">← Volver</button><div class="dashboard-head"><div><h1>Historial de kilometraje</h1><p class="muted">Las lecturas del QR conservan su fecha y hora automáticas.</p></div><div class="mileage-head-actions"><button id="correctmileage" class="secondary">Corregir kilometraje actual</button><button id="addhistorical">+ Cargar lectura histórica</button></div></div>${rows.length?`<div class="historylist">${rows.map(x=>`<article class="historyrow"><div><strong>${fmt(x.mileage)} km</strong><span>${new Date(x.createdAt).toLocaleString('es-CO')}</span><small>${esc(sourceLabel(x.source))}${x.isExceptional?' · 🟠 Lectura excepcional':''}</small></div></article>`).join('')}</div>`:'<p class="muted">No hay lecturas todavía.</p>'}`);
  document.getElementById('back').onclick=()=>adminShell('vehicles');
  document.getElementById('addhistorical').onclick=()=>addHistoricalMileage(vehicleId);
+ document.getElementById('correctmileage').onclick=()=>correctMileage(vehicleId,current);
 }
 function sourceLabel(s){return ({INITIAL:'Lectura inicial',PUBLIC_QR:'QR público',TECHNICIAN:'Técnico',ADMIN_HISTORICAL:'Carga histórica',ADMIN_CORRECTION:'Corrección administrativa',IMPORT:'Importación'})[s]||s}
+function correctMileage(vehicleId,currentMileage){
+ openFormModal({
+  title:'Corregir kilometraje actual',
+  body:`<p class="muted">Usa esta opción solo para corregir un error (por ejemplo, un dígito de más). Como administrador puedes poner cualquier valor, incluso menor al actual — no aplican los límites que sí se piden a conductores y técnicos.</p><label>Kilometraje actual<input name="km" type="number" min="0" value="${currentMileage}" required></label>`,
+  onSubmit:async(f,err)=>{
+   const km=Number(f.get('km'));
+   if(!Number.isFinite(km)||km<0){err.textContent='Ingresa un kilometraje válido.';return false}
+   if(!confirm(`¿Confirmas cambiar el kilometraje a ${fmt(km)} km?`))return false;
+   const out=await req(`${api}/vehicles/${vehicleId}/mileage`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({mileage:km})});
+   if(!out.r||!out.r.ok){err.textContent=out.j.error?.message||'No se pudo corregir el kilometraje.';return false}
+   mileageHistory(vehicleId);return true
+  }
+ })
+}
 function addHistoricalMileage(vehicleId){
  const wrap=openFormModal({
   title:'Cargar lectura histórica',

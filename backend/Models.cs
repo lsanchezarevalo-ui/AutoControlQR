@@ -1,7 +1,7 @@
 record LoginRequest(string Email,string Password);
 record CreateCompanyRequest(string Name,string AdminName,string AdminEmail,string AdminPassword);
 record CompanyStatusRequest(string Status);
-record UpdateCompanyRequest(string Name,string? LegalName,string? TaxId,string? Phone,string? Email,string? Address,string? LogoDataUrl);
+record UpdateCompanyRequest(string Name,string? LegalName,string? TaxId,string? Phone,string? Email,string? Address,string? LogoDataUrl,int ExceptionalMileageThreshold);
 record NotificationSettingsRequest(bool Enabled,bool Internal,bool EmailEnabled,string? Email,bool DueSoon,bool Overdue,int RepeatDays);
 record MarkNotificationRequest(Guid VehicleId,Guid ServiceId,string Status,string? Channel,string? Recipient);
 record CreateUserRequest(string FullName,string Email,string Password,string Role);
@@ -15,6 +15,7 @@ record UpdateVehicleRequest(string Plate,string? InternalNumber,string Brand,str
 record ReactivateVehicleRequest(Guid PlanVersionId);
 record MileageRequest(int Mileage,bool ExceptionConfirmed=false);
 record HistoricalMileageRequest(int Mileage,DateTime ReadingDate);
+record CorrectMileageRequest(int Mileage);
 record DemoUser(Guid Id,Guid CompanyId,string FullName,string Email,string PasswordHash,string Role);
 record CreatePlanRequest(string Name,string Brand,string Model,string? Variant);
 record UpdatePlanRequest(string Name,string Brand,string Model);

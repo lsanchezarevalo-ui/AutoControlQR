@@ -279,5 +279,29 @@ public static class MaintenanceEndpoints
             }
             catch(Exception ex){await tx.RollbackAsync();app.Logger.LogError(ex,"Historical mileage save failed");return Results.Json(new{success=false,error=new{message="No fue posible guardar la lectura histórica."}},statusCode:500);}
         }).RequireAuthorization();
+
+        // CORRECCIÓN DIRECTA DE KILOMETRAJE ACTUAL — solo administrador, sin restricciones de umbral ni de "no puede bajar"
+        app.MapPatch("/api/v1/vehicles/{vehicleId:guid}/mileage", async (ClaimsPrincipal principal, Guid vehicleId, CorrectMileageRequest req) =>
+        {
+            if(principal.FindFirstValue("role")!="COMPANY_ADMIN")return Results.Forbid();
+            var companyId=CompanyId(principal);var userId=UserId(principal);
+            if(req.Mileage<0)return Results.BadRequest(new{success=false,error=new{message="El kilometraje no puede ser negativo."}});
+            await using var con=new NpgsqlConnection(connectionString);await con.OpenAsync();await using var tx=await con.BeginTransactionAsync();
+            try
+            {
+                int previousMileage;
+                await using(var check=new NpgsqlCommand("SELECT current_mileage FROM vehicles WHERE id=@v AND company_id=@c FOR UPDATE",con,tx))
+                {check.Parameters.AddWithValue("v",vehicleId);check.Parameters.AddWithValue("c",companyId);var x=await check.ExecuteScalarAsync();if(x is null){await tx.RollbackAsync();return Results.NotFound();}previousMileage=(int)x;}
+                var now=DateTime.UtcNow;
+                await using(var ins=new NpgsqlCommand("INSERT INTO mileage_readings(vehicle_id,mileage,source,created_by_user_id,created_at) VALUES(@v,@km,'ADMIN_CORRECTION',@u,@d)",con,tx))
+                {ins.Parameters.AddWithValue("v",vehicleId);ins.Parameters.AddWithValue("km",req.Mileage);ins.Parameters.AddWithValue("u",userId);ins.Parameters.AddWithValue("d",now);await ins.ExecuteNonQueryAsync();}
+                await using(var uv=new NpgsqlCommand("UPDATE vehicles SET current_mileage=@km,mileage_updated_at=@d,updated_at=now() WHERE id=@v",con,tx))
+                {uv.Parameters.AddWithValue("km",req.Mileage);uv.Parameters.AddWithValue("d",now);uv.Parameters.AddWithValue("v",vehicleId);await uv.ExecuteNonQueryAsync();}
+                await using(var au=new NpgsqlCommand("INSERT INTO audit_logs(company_id,user_id,entity_type,entity_id,action,old_values,new_values,source) VALUES(@c,@u,'VEHICLE',@v,'ADMIN_MILEAGE_CORRECTION',jsonb_build_object('mileage',@old),jsonb_build_object('mileage',@new),'WEB')",con,tx))
+                {au.Parameters.AddWithValue("c",companyId);au.Parameters.AddWithValue("u",userId);au.Parameters.AddWithValue("v",vehicleId);au.Parameters.AddWithValue("old",previousMileage);au.Parameters.AddWithValue("new",req.Mileage);await au.ExecuteNonQueryAsync();}
+                await tx.CommitAsync();return Results.Ok(new{success=true,data=new{previousMileage,mileage=req.Mileage}});
+            }
+            catch(Exception ex){await tx.RollbackAsync();app.Logger.LogError(ex,"Mileage correction failed");return Results.Json(new{success=false,error=new{message="No fue posible corregir el kilometraje."}},statusCode:500);}
+        }).RequireAuthorization();
     }
 }

@@ -26,7 +26,10 @@ function uiIcon(type,cls=''){
   check:'<circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16 9"/>',
   alert:'<path d="M12 3 2.5 20h19L12 3Z"/><path d="M12 9v5M12 17h.01"/>',
   gauge:'<path d="M4 17a8 8 0 1 1 16 0"/><path d="m12 13 4-4M7 17h10"/>',
-  search:'<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/>'
+  search:'<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/>',
+  chevron:'<path d="m9 6 6 6-6 6"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  list:'<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r="1.3"/><circle cx="3.5" cy="12" r="1.3"/><circle cx="3.5" cy="18" r="1.3"/>'
  };
  return `<svg class="ui-icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[type]||paths.service}</svg>`
 }
@@ -62,6 +65,9 @@ function wireToday(wrap,name){const b=wrap.querySelector('.todaybtn');if(b)b.onc
 
 function moduleTitle(icon,title,subtitle){
  return `<div class="module-title"><span class="module-title-icon">${uiIcon(icon)}</span><div><h1>${esc(title)}</h1>${subtitle?`<p class="muted">${esc(subtitle)}</p>`:''}</div></div>`
+}
+function quickMenuView(icon,title,subtitle,items){
+ return `<div class="quick-menu-head">${moduleTitle(icon,title,subtitle)}</div><div class="quick-menu">${items.map(i=>`<button type="button" class="quick-menu-item" data-action="${esc(i.action)}"><span class="quick-menu-icon">${uiIcon(i.icon)}</span><span class="quick-menu-text"><strong>${esc(i.label)}</strong><small>${esc(i.desc)}</small></span><span class="quick-menu-chev">${uiIcon('chevron')}</span></button>`).join('')}</div>`
 }
 function upperLive(input){input.addEventListener('input',()=>{const pos=input.selectionStart;input.value=input.value.toUpperCase();try{input.setSelectionRange(pos,pos)}catch{}})}
 function titleCaseValue(v){return String(v||'').trim().toLocaleLowerCase('es').replace(/(^|[\s\-\/])([a-záéíóúüñ])/g,(m,p,c)=>p+c.toLocaleUpperCase('es'))}
