@@ -13,7 +13,7 @@ public static class PlatformEndpoints
             await using var con=new NpgsqlConnection(connectionString);await con.OpenAsync();
             var sql=@"SELECT c.id,c.name,COALESCE(c.code,''),c.status,c.created_at,
               (SELECT count(*) FROM vehicles v WHERE v.company_id=c.id),
-              (SELECT count(*) FROM users u WHERE u.company_id=c.id AND u.status='ACTIVE')
+              (SELECT count(*) FROM users u WHERE u.company_id=c.id AND u.status='ACTIVE' AND u.role<>'PLATFORM_ADMIN')
               FROM companies c ORDER BY c.name";
             await using var cmd=new NpgsqlCommand(sql,con);await using var r=await cmd.ExecuteReaderAsync();var list=new List<object>();
             while(await r.ReadAsync())list.Add(new{id=r.GetGuid(0),name=r.GetString(1),code=r.GetString(2),status=r.GetString(3),createdAt=r.GetDateTime(4),vehicles=r.GetInt64(5),activeUsers=r.GetInt64(6)});
@@ -27,7 +27,7 @@ public static class PlatformEndpoints
             object? company=null;
             await using(var cmd=new NpgsqlCommand(@"SELECT c.id,c.name,COALESCE(c.code,''),c.status,c.created_at,
               (SELECT count(*) FROM vehicles v WHERE v.company_id=c.id AND v.status='ACTIVE'),
-              (SELECT count(*) FROM users u WHERE u.company_id=c.id AND u.status='ACTIVE')
+              (SELECT count(*) FROM users u WHERE u.company_id=c.id AND u.status='ACTIVE' AND u.role<>'PLATFORM_ADMIN')
               FROM companies c WHERE c.id=@id",con))
             {
               cmd.Parameters.AddWithValue("id",id);await using var r=await cmd.ExecuteReaderAsync();
