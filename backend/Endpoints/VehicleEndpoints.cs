@@ -108,8 +108,11 @@ public static class VehicleEndpoints
             var brand=ToTitleCase(req.Brand);var model=ToTitleCase(req.Model);
             await using var con=new NpgsqlConnection(connectionString);await con.OpenAsync();await using var tx=await con.BeginTransactionAsync();
             try{
-              await using(var planCheck=new NpgsqlCommand(@"SELECT 1 FROM maintenance_plan_versions pv JOIN maintenance_plans p ON p.id=pv.maintenance_plan_id WHERE pv.id=@pv AND p.company_id=@c AND pv.status='PUBLISHED'",con,tx))
-              {planCheck.Parameters.AddWithValue("pv",req.PlanVersionId);planCheck.Parameters.AddWithValue("c",CompanyId(principal));if(await planCheck.ExecuteScalarAsync() is null){await tx.RollbackAsync();return Results.BadRequest(new{success=false,error=new{message="Selecciona un plan de mantenimiento válido."}});}}
+              if(req.PlanVersionId.HasValue)
+              {
+                await using var planCheck=new NpgsqlCommand(@"SELECT 1 FROM maintenance_plan_versions pv JOIN maintenance_plans p ON p.id=pv.maintenance_plan_id WHERE pv.id=@pv AND p.company_id=@c AND pv.status='PUBLISHED'",con,tx);
+                planCheck.Parameters.AddWithValue("pv",req.PlanVersionId.Value);planCheck.Parameters.AddWithValue("c",CompanyId(principal));if(await planCheck.ExecuteScalarAsync() is null){await tx.RollbackAsync();return Results.BadRequest(new{success=false,error=new{message="Selecciona un plan de mantenimiento válido."}});}
+              }
               await using(var cmd=new NpgsqlCommand(@"UPDATE vehicles SET plate=@p,internal_number=@i,brand=@b,model=@m WHERE id=@v AND company_id=@c AND status='ACTIVE'",con,tx))
               {cmd.Parameters.AddWithValue("p",plate);cmd.Parameters.AddWithValue("i",(object?)internalNumber??DBNull.Value);cmd.Parameters.AddWithValue("b",brand);cmd.Parameters.AddWithValue("m",model);cmd.Parameters.AddWithValue("v",vehicleId);cmd.Parameters.AddWithValue("c",CompanyId(principal));if(await cmd.ExecuteNonQueryAsync()==0){await tx.RollbackAsync();return Results.NotFound();}}
               Guid? currentPlan=null;
@@ -118,7 +121,10 @@ public static class VehicleEndpoints
               if(currentPlan!=req.PlanVersionId)
               {
                 await using(var close=new NpgsqlCommand("UPDATE vehicle_plan_assignments SET active=false,ends_at=now() WHERE vehicle_id=@v AND active=true",con,tx)){close.Parameters.AddWithValue("v",vehicleId);await close.ExecuteNonQueryAsync();}
-                await using(var ins=new NpgsqlCommand("INSERT INTO vehicle_plan_assignments(vehicle_id,plan_version_id,assigned_by_user_id) VALUES(@v,@p,@u)",con,tx)){ins.Parameters.AddWithValue("v",vehicleId);ins.Parameters.AddWithValue("p",req.PlanVersionId);ins.Parameters.AddWithValue("u",UserId(principal));await ins.ExecuteNonQueryAsync();}
+                if(req.PlanVersionId.HasValue)
+                {
+                  await using(var ins=new NpgsqlCommand("INSERT INTO vehicle_plan_assignments(vehicle_id,plan_version_id,assigned_by_user_id) VALUES(@v,@p,@u)",con,tx)){ins.Parameters.AddWithValue("v",vehicleId);ins.Parameters.AddWithValue("p",req.PlanVersionId.Value);ins.Parameters.AddWithValue("u",UserId(principal));await ins.ExecuteNonQueryAsync();}
+                }
               }
               await tx.CommitAsync();return Results.Ok(new{success=true});
             }catch(PostgresException ex) when(ex.SqlState=="23505"){await tx.RollbackAsync();return Results.Conflict(new{success=false,error=new{message="La placa o número interno ya está registrado."}});}

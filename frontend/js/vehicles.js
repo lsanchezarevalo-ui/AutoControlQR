@@ -92,9 +92,9 @@ async function archiveVehicle(id,plate){
 async function editVehicle(id,vehicles,plans){
  const v=vehicles.find(x=>x.id===id);if(!v)return;
  const catalog=vehicleCatalog(vehicles,plans);
- const body=`<label>Placa<input name="plate" class="force-upper" value="${esc(v.plate)}" required></label><label>Número interno<input name="internal" class="force-upper" value="${esc(v.internalNumber||'')}" placeholder="Opcional"></label>${catalogFields(catalog,'editvehicle')}<label>Plan de mantenimiento<select name="planVersionId" required><option value="">Selecciona plan</option>${plans.map(p=>`<option value="${p.versionId}" ${v.planVersionId===p.versionId?'selected':''}>${esc(p.name)} V${p.versionNumber}</option>`).join('')}</select></label>`;
+ const body=`<label>Placa<input name="plate" class="force-upper" value="${esc(v.plate)}" required></label><label>Número interno<input name="internal" class="force-upper" value="${esc(v.internalNumber||'')}" placeholder="Opcional"></label>${catalogFields(catalog,'editvehicle')}<label>Plan de mantenimiento<select name="planVersionId"><option value="">Ningún plan (vehículo independiente)</option>${plans.map(p=>`<option value="${p.versionId}" ${v.planVersionId===p.versionId?'selected':''}>${esc(p.name)} V${p.versionNumber}</option>`).join('')}</select></label>`;
  const wrap=openFormModal({title:`Editar vehículo · ${v.plate}`,body,onSubmit:async(f,err)=>{
-   const out=await req(`${api}/vehicles/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({plate:String(f.get('plate')).trim().toUpperCase(),internalNumber:f.get('internal')?String(f.get('internal')).trim().toUpperCase():null,brand:titleCaseValue(f.get('brand')),model:titleCaseValue(f.get('model')),planVersionId:f.get('planVersionId')})});
+   const out=await req(`${api}/vehicles/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({plate:String(f.get('plate')).trim().toUpperCase(),internalNumber:f.get('internal')?String(f.get('internal')).trim().toUpperCase():null,brand:titleCaseValue(f.get('brand')),model:titleCaseValue(f.get('model')),planVersionId:f.get('planVersionId')||null})});
    if(!out.r||!out.r.ok){err.textContent=out.j.error?.message||'No se pudo actualizar el vehículo.';return false}
    adminShell('vehicles');return true
  }});

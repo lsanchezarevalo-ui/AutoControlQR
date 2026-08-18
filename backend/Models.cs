@@ -11,7 +11,7 @@ record UpdateUserRequest(string FullName,string Email,string Role);
 record ResetUserPasswordRequest(string Password);
 record ChangeOwnPasswordRequest(string CurrentPassword,string NewPassword);
 record CreateVehicleRequest(string Plate,string? InternalNumber,string Brand,string Model,string? Variant,int CurrentMileage,Guid? PlanVersionId);
-record UpdateVehicleRequest(string Plate,string? InternalNumber,string Brand,string Model,Guid PlanVersionId);
+record UpdateVehicleRequest(string Plate,string? InternalNumber,string Brand,string Model,Guid? PlanVersionId);
 record ReactivateVehicleRequest(Guid PlanVersionId);
 record MileageRequest(int Mileage,bool ExceptionConfirmed=false);
 record HistoricalMileageRequest(int Mileage,DateTime ReadingDate);
