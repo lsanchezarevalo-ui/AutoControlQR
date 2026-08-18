@@ -58,8 +58,8 @@
 @media(max-width:650px){.plan-create-grid{grid-template-columns:1fr}.plan-list-head{align-items:stretch;flex-direction:column;gap:10px}.plan-search{width:100%}.plan-card{display:grid;gap:14px}.plan-actions{justify-content:stretch;display:grid;grid-template-columns:1fr 1fr}.plan-actions button{width:100%}.service-interval-grid{grid-template-columns:1fr}.service-page-head{align-items:stretch;flex-direction:column}.service-plan-row{grid-template-columns:1fr 1fr}.service-plan-row>div:first-child{grid-column:1/-1}}
 
 /* V23.1 edición de servicios */
-.service-plan-row{grid-template-columns:minmax(220px,1.5fr) 1fr 1fr auto}.service-row-action{display:flex;justify-content:flex-end}.service-row-action button{padding:9px 13px}
-@media(max-width:650px){.service-plan-row{grid-template-columns:1fr 1fr}.service-row-action{grid-column:1/-1}.service-row-action button{width:100%}}
+.service-plan-row{grid-template-columns:minmax(220px,1.5fr) 1fr 1fr auto}.service-row-action{display:flex;justify-content:flex-end;gap:14px;align-items:center}.service-row-action button{padding:9px 13px}
+@media(max-width:650px){.service-plan-row{grid-template-columns:1fr 1fr}.service-row-action{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:8px}.service-row-action button{width:100%}}
 
 /* V23.2 ubicación de edición de servicios */
 .service-head-actions{display:flex;gap:10px;align-items:center}.service-edit-action{display:none}.service-edit-action.visible{display:flex}

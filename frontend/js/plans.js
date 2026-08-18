@@ -111,13 +111,19 @@ async function addService(versionId,planName='Plan'){
 async function showServices(versionId,name){
  const out=await req(`${api}/plan-versions/${versionId}/services`);if(!out.r||!out.r.ok)return alert('No se pudieron cargar los servicios.');
  const services=out.j.data||[],main=document.getElementById('main');
- main.innerHTML=card(`<button id="backPlans" class="secondary">← Volver a planes</button><div class="service-page-head"><div><h1>${esc(name)}</h1><p class="muted">Servicios configurados en este plan.</p></div><div class="service-head-actions"><button id="editServicesHere" class="secondary">Editar servicios</button><button id="addServiceHere">+ Agregar servicio</button></div></div>${services.length?`<div class="service-plan-list">${services.map(x=>`<article class="service-plan-row"><div><strong>${esc(x.name)}</strong>${x.specification?`<small>${esc(x.specification)}</small>`:''}</div><div><small>Intervalo</small><b>${x.intervalKm?fmt(x.intervalKm)+' km':'—'}</b></div><div><small>Prealerta</small><b>${x.prealertKm?fmt(x.prealertKm)+' km':'—'}</b></div><div class="service-row-action service-edit-action"><button class="secondary editservice" data-service="${x.id}">Editar</button></div></article>`).join('')}</div>`:'<div class="no-search-results">Este plan todavía no tiene servicios. Agrega el primero para comenzar.</div>'}`);
+ main.innerHTML=card(`<button id="backPlans" class="secondary">← Volver a planes</button><div class="service-page-head"><div><h1>${esc(name)}</h1><p class="muted">Servicios configurados en este plan.</p></div><div class="service-head-actions"><button id="editServicesHere" class="secondary">Editar servicios</button><button id="addServiceHere">+ Agregar servicio</button></div></div>${services.length?`<div class="service-plan-list">${services.map(x=>`<article class="service-plan-row"><div><strong>${esc(x.name)}</strong>${x.specification?`<small>${esc(x.specification)}</small>`:''}</div><div><small>Intervalo</small><b>${x.intervalKm?fmt(x.intervalKm)+' km':'—'}</b></div><div><small>Prealerta</small><b>${x.prealertKm?fmt(x.prealertKm)+' km':'—'}</b></div><div class="service-row-action service-edit-action"><button class="secondary editservice" data-service="${x.id}">Editar</button><button class="textbtn dangertext removeservice" data-service="${x.id}" data-name="${esc(x.name)}">Quitar</button></div></article>`).join('')}</div>`:'<div class="no-search-results">Este plan todavía no tiene servicios. Agrega el primero para comenzar.</div>'}`);
  document.getElementById('backPlans').onclick=()=>adminShell('plans');
  document.getElementById('addServiceHere').onclick=()=>addService(versionId,name);
  const editToggle=document.getElementById('editServicesHere');
  let editMode=false;
  editToggle.onclick=()=>{editMode=!editMode;document.querySelectorAll('.service-edit-action').forEach(x=>x.classList.toggle('visible',editMode));editToggle.textContent=editMode?'Terminar edición':'Editar servicios'};
  document.querySelectorAll('.editservice').forEach(b=>b.onclick=()=>editService(versionId,name,services.find(x=>x.id===b.dataset.service)))
+ document.querySelectorAll('.removeservice').forEach(b=>b.onclick=async()=>{
+  if(!confirm(`¿Quitar "${b.dataset.name}" de este plan?\n\nTodos los vehículos que usan este plan dejarán de verlo en su estado de mantenimiento. El historial de mantenimientos ya registrados con este servicio se conserva.`))return;
+  const out2=await req(`${api}/plan-services/${b.dataset.service}/archive`,{method:'PATCH'});
+  if(!out2.r||!out2.r.ok)return alert(out2.j.error?.message||'No se pudo quitar el servicio.');
+  showServices(versionId,name);
+ })
 }
 
 async function editService(versionId,planName,service){

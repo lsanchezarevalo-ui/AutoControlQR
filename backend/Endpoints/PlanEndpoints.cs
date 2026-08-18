@@ -121,6 +121,18 @@ public static class PlanEndpoints
             return Results.Ok(new{success=true});
         }).RequireAuthorization();
 
+        app.MapPatch("/api/v1/plan-services/{serviceId:guid}/archive", async (ClaimsPrincipal principal, Guid serviceId) =>
+        {
+            if(principal.FindFirstValue("role")!="COMPANY_ADMIN")return Results.Forbid();
+            await using var con=new NpgsqlConnection(connectionString);await con.OpenAsync();
+            var sql=@"UPDATE maintenance_plan_services s SET active=false
+                      FROM maintenance_plan_versions pv JOIN maintenance_plans p ON p.id=pv.maintenance_plan_id
+                      WHERE s.id=@id AND s.plan_version_id=pv.id AND p.company_id=@c AND s.active=true";
+            await using var cmd=new NpgsqlCommand(sql,con);cmd.Parameters.AddWithValue("id",serviceId);cmd.Parameters.AddWithValue("c",CompanyId(principal));
+            if(await cmd.ExecuteNonQueryAsync()==0)return Results.NotFound();
+            return Results.Ok(new{success=true});
+        }).RequireAuthorization();
+
         app.MapPost("/api/v1/vehicles/{vehicleId:guid}/assign-plan", async (ClaimsPrincipal principal, Guid vehicleId, AssignPlanRequest req) =>
         {
             if(principal.FindFirstValue("role")!="COMPANY_ADMIN")return Results.Forbid();
