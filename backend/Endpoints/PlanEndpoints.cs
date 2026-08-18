@@ -163,13 +163,28 @@ public static class PlanEndpoints
                 if(activeVersion.HasValue) versionId=activeVersion.Value;
                 else
                 {
-                    var planId=Guid.NewGuid();versionId=Guid.NewGuid();
-                    await using(var p=new NpgsqlCommand(@"INSERT INTO maintenance_plans(id,company_id,name,brand,model,status,is_vehicle_specific,vehicle_id)
-                      VALUES(@id,@c,@n,@b,@m,'ACTIVE',true,@v)",con,tx))
-                    {p.Parameters.AddWithValue("id",planId);p.Parameters.AddWithValue("c",companyId);p.Parameters.AddWithValue("n",$"__VEHICLE_{vehicleId:N}");p.Parameters.AddWithValue("b",brand);p.Parameters.AddWithValue("m",model);p.Parameters.AddWithValue("v",vehicleId);await p.ExecuteNonQueryAsync();}
-                    await using(var pv=new NpgsqlCommand(@"INSERT INTO maintenance_plan_versions(id,maintenance_plan_id,version_number,status,published_at,created_by_user_id)
-                      VALUES(@id,@p,1,'PUBLISHED',now(),@u)",con,tx))
-                    {pv.Parameters.AddWithValue("id",versionId);pv.Parameters.AddWithValue("p",planId);pv.Parameters.AddWithValue("u",userId);await pv.ExecuteNonQueryAsync();}
+                    // Si este vehículo ya tuvo antes un plan individual oculto (por ejemplo, antes de
+                    // asignarle un plan compartido que luego se desvinculó), se reutiliza en vez de crear
+                    // uno nuevo con el mismo nombre — evita un choque de unicidad y recupera sus servicios previos.
+                    Guid? existingPlanId=null;
+                    await using(var ep=new NpgsqlCommand("SELECT id FROM maintenance_plans WHERE company_id=@c AND is_vehicle_specific=true AND vehicle_id=@v LIMIT 1",con,tx))
+                    {ep.Parameters.AddWithValue("c",companyId);ep.Parameters.AddWithValue("v",vehicleId);var x=await ep.ExecuteScalarAsync();if(x is Guid g)existingPlanId=g;}
+                    if(existingPlanId.HasValue)
+                    {
+                        await using(var pv=new NpgsqlCommand("SELECT id FROM maintenance_plan_versions WHERE maintenance_plan_id=@p ORDER BY version_number DESC LIMIT 1",con,tx))
+                        {pv.Parameters.AddWithValue("p",existingPlanId.Value);versionId=(Guid)(await pv.ExecuteScalarAsync())!;}
+                        await using(var st=new NpgsqlCommand("UPDATE maintenance_plans SET status='ACTIVE' WHERE id=@p",con,tx)){st.Parameters.AddWithValue("p",existingPlanId.Value);await st.ExecuteNonQueryAsync();}
+                    }
+                    else
+                    {
+                        var planId=Guid.NewGuid();versionId=Guid.NewGuid();
+                        await using(var p=new NpgsqlCommand(@"INSERT INTO maintenance_plans(id,company_id,name,brand,model,status,is_vehicle_specific,vehicle_id)
+                          VALUES(@id,@c,@n,@b,@m,'ACTIVE',true,@v)",con,tx))
+                        {p.Parameters.AddWithValue("id",planId);p.Parameters.AddWithValue("c",companyId);p.Parameters.AddWithValue("n",$"__VEHICLE_{vehicleId:N}");p.Parameters.AddWithValue("b",brand);p.Parameters.AddWithValue("m",model);p.Parameters.AddWithValue("v",vehicleId);await p.ExecuteNonQueryAsync();}
+                        await using(var pv=new NpgsqlCommand(@"INSERT INTO maintenance_plan_versions(id,maintenance_plan_id,version_number,status,published_at,created_by_user_id)
+                          VALUES(@id,@p,1,'PUBLISHED',now(),@u)",con,tx))
+                        {pv.Parameters.AddWithValue("id",versionId);pv.Parameters.AddWithValue("p",planId);pv.Parameters.AddWithValue("u",userId);await pv.ExecuteNonQueryAsync();}
+                    }
                     await using(var a=new NpgsqlCommand("INSERT INTO vehicle_plan_assignments(vehicle_id,plan_version_id,assigned_by_user_id) VALUES(@v,@p,@u)",con,tx))
                     {a.Parameters.AddWithValue("v",vehicleId);a.Parameters.AddWithValue("p",versionId);a.Parameters.AddWithValue("u",userId);await a.ExecuteNonQueryAsync();}
                 }
