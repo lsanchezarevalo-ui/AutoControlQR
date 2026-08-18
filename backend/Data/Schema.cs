@@ -103,6 +103,48 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_vehicle_specific_plan ON maintenance_plans(
         await using var con=new NpgsqlConnection(cs);await con.OpenAsync();await using var cmd=new NpgsqlCommand(sql,con);await cmd.ExecuteNonQueryAsync();
     }
 
+    public static async Task EnsureV32ServiceCatalogSchema(string cs)
+    {
+        var sql=@"
+CREATE TABLE IF NOT EXISTS company_services (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(), company_id uuid NOT NULL REFERENCES companies(id), name varchar(150) NOT NULL, category varchar(100) NOT NULL DEFAULT 'General',
+ specification varchar(300), default_interval_km integer, default_interval_months integer, default_prealert_km integer, default_prealert_days integer,
+ active boolean NOT NULL DEFAULT true, created_by_user_id uuid REFERENCES users(id), created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
+CREATE UNIQUE INDEX IF NOT EXISTS uq_company_service_active_name ON company_services(company_id, lower(name)) WHERE active=true;
+ALTER TABLE maintenance_plan_services ADD COLUMN IF NOT EXISTS company_service_id uuid REFERENCES company_services(id);
+ALTER TABLE vehicle_service_baselines ADD COLUMN IF NOT EXISTS company_service_id uuid REFERENCES company_services(id);
+ALTER TABLE maintenance_record_items ADD COLUMN IF NOT EXISTS company_service_id uuid REFERENCES company_services(id);
+
+INSERT INTO company_services(company_id,name,category,specification,default_interval_km,default_interval_months,default_prealert_km,default_prealert_days)
+SELECT DISTINCT ON (p.company_id, lower(s.name))
+  p.company_id, s.name, s.category, s.specification, s.interval_km, s.interval_months, s.prealert_km, s.prealert_days
+FROM maintenance_plan_services s
+JOIN maintenance_plan_versions pv ON pv.id=s.plan_version_id
+JOIN maintenance_plans p ON p.id=pv.maintenance_plan_id
+WHERE s.company_service_id IS NULL
+  AND NOT EXISTS (SELECT 1 FROM company_services cs WHERE cs.company_id=p.company_id AND lower(cs.name)=lower(s.name))
+ORDER BY p.company_id, lower(s.name), s.created_at DESC;
+
+UPDATE maintenance_plan_services s
+SET company_service_id=cs.id
+FROM maintenance_plan_versions pv, maintenance_plans p, company_services cs
+WHERE s.plan_version_id=pv.id AND pv.maintenance_plan_id=p.id
+  AND cs.company_id=p.company_id AND lower(cs.name)=lower(s.name)
+  AND s.company_service_id IS NULL;
+
+UPDATE vehicle_service_baselines b
+SET company_service_id=s.company_service_id
+FROM maintenance_plan_services s
+WHERE b.plan_service_id=s.id AND b.company_service_id IS NULL AND s.company_service_id IS NOT NULL;
+
+UPDATE maintenance_record_items i
+SET company_service_id=s.company_service_id
+FROM maintenance_plan_services s
+WHERE i.plan_service_id=s.id AND i.company_service_id IS NULL AND s.company_service_id IS NOT NULL;
+";
+        await using var con=new NpgsqlConnection(cs);await con.OpenAsync();await using var cmd=new NpgsqlCommand(sql,con);cmd.CommandTimeout=120;await cmd.ExecuteNonQueryAsync();
+    }
+
     public static async Task EnsureDemoData(string cs)
     {
         await using var con=new NpgsqlConnection(cs);await con.OpenAsync();

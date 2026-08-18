@@ -82,14 +82,15 @@ public static class PlanEndpoints
             if(req.IntervalKm is null && req.IntervalMonths is null) return Results.BadRequest(new{success=false,error=new{message="Debes definir un intervalo por kilometraje o por tiempo."}});
             if(req.IntervalKm.HasValue && req.IntervalKm.Value<=0)return Results.BadRequest(new{success=false,error=new{message="El intervalo por kilometraje debe ser mayor que cero."}});
             if(req.PrealertKm.HasValue && req.PrealertKm.Value<0)return Results.BadRequest(new{success=false,error=new{message="La prealerta no puede ser negativa."}});
-            var companyId=CompanyId(principal);
+            var companyId=CompanyId(principal);var userId=UserId(principal);
             await using var con=new NpgsqlConnection(connectionString);await con.OpenAsync();
             await using(var verify=new NpgsqlCommand(@"SELECT 1 FROM maintenance_plan_versions pv JOIN maintenance_plans p ON p.id=pv.maintenance_plan_id WHERE pv.id=@v AND p.company_id=@c",con))
             {verify.Parameters.AddWithValue("v",versionId);verify.Parameters.AddWithValue("c",companyId);if(await verify.ExecuteScalarAsync() is null)return Results.NotFound();}
+            var companyServiceId=await ResolveOrCreateCompanyService(con,null,companyId,userId,req.Name,req.Category,req.Specification,req.IntervalKm,req.IntervalMonths,req.PrealertKm,req.PrealertDays);
             var id=Guid.NewGuid();
-            await using var cmd=new NpgsqlCommand(@"INSERT INTO maintenance_plan_services(id,plan_version_id,name,category,specification,interval_km,interval_months,prealert_km,prealert_days)
-                                                   VALUES(@id,@v,@n,@cat,@spec,@ikm,@imon,@pkm,@pday)",con);
-            cmd.Parameters.AddWithValue("id",id);cmd.Parameters.AddWithValue("v",versionId);cmd.Parameters.AddWithValue("n",req.Name.Trim());cmd.Parameters.AddWithValue("cat",req.Category.Trim());
+            await using var cmd=new NpgsqlCommand(@"INSERT INTO maintenance_plan_services(id,plan_version_id,company_service_id,name,category,specification,interval_km,interval_months,prealert_km,prealert_days)
+                                                   VALUES(@id,@v,@cs,@n,@cat,@spec,@ikm,@imon,@pkm,@pday)",con);
+            cmd.Parameters.AddWithValue("id",id);cmd.Parameters.AddWithValue("v",versionId);cmd.Parameters.AddWithValue("cs",companyServiceId);cmd.Parameters.AddWithValue("n",req.Name.Trim());cmd.Parameters.AddWithValue("cat",req.Category.Trim());
             cmd.Parameters.AddWithValue("spec",(object?)req.Specification?.Trim()??DBNull.Value);cmd.Parameters.AddWithValue("ikm",(object?)req.IntervalKm??DBNull.Value);cmd.Parameters.AddWithValue("imon",(object?)req.IntervalMonths??DBNull.Value);cmd.Parameters.AddWithValue("pkm",(object?)req.PrealertKm??DBNull.Value);cmd.Parameters.AddWithValue("pday",(object?)req.PrealertDays??DBNull.Value);
             await cmd.ExecuteNonQueryAsync();
             return Results.Ok(new{success=true,data=new{id}});
@@ -102,15 +103,20 @@ public static class PlanEndpoints
             if(req.IntervalKm is null && req.IntervalMonths is null)return Results.BadRequest(new{success=false,error=new{message="Debes definir un intervalo por kilometraje o por tiempo."}});
             if(req.IntervalKm.HasValue && req.IntervalKm.Value<=0)return Results.BadRequest(new{success=false,error=new{message="El intervalo por kilometraje debe ser mayor que cero."}});
             if(req.PrealertKm.HasValue && req.PrealertKm.Value<0)return Results.BadRequest(new{success=false,error=new{message="La prealerta no puede ser negativa."}});
+            var companyId=CompanyId(principal);var userId=UserId(principal);
             await using var con=new NpgsqlConnection(connectionString);await con.OpenAsync();
-            var sql=@"UPDATE maintenance_plan_services s SET name=@n,specification=@spec,interval_km=@ikm,interval_months=@imon,prealert_km=@pkm,prealert_days=@pday
+            string category;
+            await using(var cc=new NpgsqlCommand(@"SELECT s.category FROM maintenance_plan_services s JOIN maintenance_plan_versions pv ON pv.id=s.plan_version_id JOIN maintenance_plans p ON p.id=pv.maintenance_plan_id WHERE s.id=@id AND p.company_id=@c AND s.active=true",con))
+            {cc.Parameters.AddWithValue("id",serviceId);cc.Parameters.AddWithValue("c",companyId);var x=await cc.ExecuteScalarAsync();if(x is null)return Results.NotFound();category=(string)x;}
+            var companyServiceId=await ResolveOrCreateCompanyService(con,null,companyId,userId,req.Name,category,req.Specification,req.IntervalKm,req.IntervalMonths,req.PrealertKm,req.PrealertDays);
+            var sql=@"UPDATE maintenance_plan_services s SET name=@n,company_service_id=@cs,specification=@spec,interval_km=@ikm,interval_months=@imon,prealert_km=@pkm,prealert_days=@pday
                       FROM maintenance_plan_versions pv JOIN maintenance_plans p ON p.id=pv.maintenance_plan_id
                       WHERE s.id=@id AND s.plan_version_id=pv.id AND p.company_id=@c AND s.active=true";
             await using var cmd=new NpgsqlCommand(sql,con);
-            cmd.Parameters.AddWithValue("n",req.Name.Trim());cmd.Parameters.AddWithValue("spec",(object?)req.Specification?.Trim()??DBNull.Value);
+            cmd.Parameters.AddWithValue("n",req.Name.Trim());cmd.Parameters.AddWithValue("cs",companyServiceId);cmd.Parameters.AddWithValue("spec",(object?)req.Specification?.Trim()??DBNull.Value);
             cmd.Parameters.AddWithValue("ikm",(object?)req.IntervalKm??DBNull.Value);cmd.Parameters.AddWithValue("imon",(object?)req.IntervalMonths??DBNull.Value);
             cmd.Parameters.AddWithValue("pkm",(object?)req.PrealertKm??DBNull.Value);cmd.Parameters.AddWithValue("pday",(object?)req.PrealertDays??DBNull.Value);
-            cmd.Parameters.AddWithValue("id",serviceId);cmd.Parameters.AddWithValue("c",CompanyId(principal));
+            cmd.Parameters.AddWithValue("id",serviceId);cmd.Parameters.AddWithValue("c",companyId);
             if(await cmd.ExecuteNonQueryAsync()==0)return Results.NotFound();
             return Results.Ok(new{success=true});
         }).RequireAuthorization();
@@ -167,11 +173,12 @@ public static class PlanEndpoints
                     await using(var a=new NpgsqlCommand("INSERT INTO vehicle_plan_assignments(vehicle_id,plan_version_id,assigned_by_user_id) VALUES(@v,@p,@u)",con,tx))
                     {a.Parameters.AddWithValue("v",vehicleId);a.Parameters.AddWithValue("p",versionId);a.Parameters.AddWithValue("u",userId);await a.ExecuteNonQueryAsync();}
                 }
+                var companyServiceId=await ResolveOrCreateCompanyService(con,tx,companyId,userId,req.Name,req.Category,req.Specification,req.IntervalKm,req.IntervalMonths,req.PrealertKm,req.PrealertDays);
                 var serviceId=Guid.NewGuid();
-                await using(var sc=new NpgsqlCommand(@"INSERT INTO maintenance_plan_services(id,plan_version_id,name,category,specification,interval_km,interval_months,prealert_km,prealert_days)
-                  VALUES(@id,@pv,@n,@cat,@sp,@ik,@im,@pk,@pd)",con,tx))
+                await using(var sc=new NpgsqlCommand(@"INSERT INTO maintenance_plan_services(id,plan_version_id,company_service_id,name,category,specification,interval_km,interval_months,prealert_km,prealert_days)
+                  VALUES(@id,@pv,@cs,@n,@cat,@sp,@ik,@im,@pk,@pd)",con,tx))
                 {
-                    sc.Parameters.AddWithValue("id",serviceId);sc.Parameters.AddWithValue("pv",versionId);sc.Parameters.AddWithValue("n",req.Name.Trim());
+                    sc.Parameters.AddWithValue("id",serviceId);sc.Parameters.AddWithValue("pv",versionId);sc.Parameters.AddWithValue("cs",companyServiceId);sc.Parameters.AddWithValue("n",req.Name.Trim());
                     sc.Parameters.AddWithValue("cat",string.IsNullOrWhiteSpace(req.Category)?"General":req.Category.Trim());
                     sc.Parameters.AddWithValue("sp",(object?)req.Specification?.Trim()??DBNull.Value);sc.Parameters.AddWithValue("ik",(object?)req.IntervalKm??DBNull.Value);
                     sc.Parameters.AddWithValue("im",(object?)req.IntervalMonths??DBNull.Value);sc.Parameters.AddWithValue("pk",(object?)req.PrealertKm??DBNull.Value);

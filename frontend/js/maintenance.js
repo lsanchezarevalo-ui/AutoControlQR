@@ -6,10 +6,11 @@ async function maintenanceView(vehicleId){
  document.getElementById('back').onclick=()=>adminShell('vehicles');const addVehicleServiceBtn=document.getElementById('addVehicleService');if(addVehicleServiceBtn)addVehicleServiceBtn.onclick=()=>addIndividualVehicleService(vehicleId);document.querySelectorAll('.baselinebtn').forEach(b=>b.onclick=()=>loadBaseline(vehicleId,b.dataset.service));document.querySelectorAll('.registerbtn').forEach(b=>b.onclick=()=>{if(b.dataset.status==='UP_TO_DATE'&&!confirm(`Este servicio está AL DÍA y todavía no corresponde por kilometraje o tiempo.\n\n¿Estás seguro de registrar "${b.dataset.name}" ahora?`))return;registerMaintenance(vehicleId,d.currentMileage,b.dataset.service,b.dataset.name)});
 }
 
-function addIndividualVehicleService(vehicleId){
+async function addIndividualVehicleService(vehicleId){
+ const catOut=await req(api+'/service-catalog'),catalog=catOut.r&&catOut.r.ok?(catOut.j.data||[]):[];
  const wrap=openFormModal({
   title:'Agregar servicio al vehículo',
-  body:`<label>Servicio<input name="name" placeholder="Ej. Aceite Motor" required></label><div class="service-interval-grid"><label>Intervalo por kilometraje<input name="interval" class="integer-km" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="10000" required></label><label>Prealerta<input name="pre" class="integer-km" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="1000"></label></div><label>Especificación <small class="optional-label">Opcional</small><input name="spec" placeholder="Ej. 5W-30"></label><p class="muted">Este servicio pertenecerá únicamente a este vehículo. No crea un Plan de Mantenimiento para otros vehículos.</p>`,
+  body:`${serviceIntervalFields({interval:'',pre:'1000'},catalog)}<p class="muted">Este servicio pertenecerá únicamente a este vehículo. No crea un Plan de Mantenimiento para otros vehículos.</p>`,
   onSubmit:async(f,err)=>{
     const interval=Number(String(f.get('interval')).replace(/\D/g,'')),pre=Number(String(f.get('pre')||'0').replace(/\D/g,''));
     if(!interval){err.textContent='Ingresa un intervalo válido.';return false}
@@ -17,7 +18,7 @@ function addIndividualVehicleService(vehicleId){
     if(!out.r||!out.r.ok){err.textContent=out.j.error?.message||'No se pudo agregar el servicio.';return false}
     maintenanceView(vehicleId);return true
   }
- });wrap.querySelectorAll('.integer-km').forEach(integerOnly)
+ });wrap.querySelectorAll('.integer-km').forEach(integerOnly);wireServiceCatalogAutofill(wrap,catalog)
 }
 
 async function registerMaintenance(vehicleId,currentMileage,serviceId,serviceName){

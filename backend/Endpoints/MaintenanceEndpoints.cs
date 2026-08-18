@@ -13,12 +13,13 @@ public static class MaintenanceEndpoints
                 return Results.BadRequest(new{success=false,error=new{message="El kilometraje no puede ser negativo."}});
             var companyId=CompanyId(principal);var userId=UserId(principal);
             await using var con=new NpgsqlConnection(connectionString);await con.OpenAsync();
-            var verify=@"SELECT 1 FROM vehicles v JOIN vehicle_plan_assignments a ON a.vehicle_id=v.id AND a.active=true JOIN maintenance_plan_services s ON s.plan_version_id=a.plan_version_id WHERE v.id=@v AND v.company_id=@c AND s.id=@s";
-            await using(var c=new NpgsqlCommand(verify,con)){c.Parameters.AddWithValue("v",vehicleId);c.Parameters.AddWithValue("c",companyId);c.Parameters.AddWithValue("s",req.PlanServiceId);if(await c.ExecuteScalarAsync() is null)return Results.BadRequest(new{success=false,error=new{message="El servicio no pertenece al plan activo del vehículo."}});}
-            var sql=@"INSERT INTO vehicle_service_baselines(vehicle_id,plan_service_id,last_service_mileage,last_service_date,source,created_by_user_id)
-                      VALUES(@v,@s,@km,@d,'ADMIN',@u)
-                      ON CONFLICT(vehicle_id,plan_service_id) DO UPDATE SET last_service_mileage=excluded.last_service_mileage,last_service_date=excluded.last_service_date,created_by_user_id=excluded.created_by_user_id,created_at=now()";
-            await using var cmd=new NpgsqlCommand(sql,con);cmd.Parameters.AddWithValue("v",vehicleId);cmd.Parameters.AddWithValue("s",req.PlanServiceId);cmd.Parameters.AddWithValue("km",(object?)req.LastServiceMileage??DBNull.Value);cmd.Parameters.AddWithValue("d",(object?)req.LastServiceDate?.Date??DBNull.Value);cmd.Parameters.AddWithValue("u",userId);await cmd.ExecuteNonQueryAsync();
+            var verify=@"SELECT s.company_service_id FROM vehicles v JOIN vehicle_plan_assignments a ON a.vehicle_id=v.id AND a.active=true JOIN maintenance_plan_services s ON s.plan_version_id=a.plan_version_id WHERE v.id=@v AND v.company_id=@c AND s.id=@s";
+            Guid? companyServiceId=null;
+            await using(var c=new NpgsqlCommand(verify,con)){c.Parameters.AddWithValue("v",vehicleId);c.Parameters.AddWithValue("c",companyId);c.Parameters.AddWithValue("s",req.PlanServiceId);var x=await c.ExecuteScalarAsync();if(x is null)return Results.BadRequest(new{success=false,error=new{message="El servicio no pertenece al plan activo del vehículo."}});if(x is Guid g)companyServiceId=g;}
+            var sql=@"INSERT INTO vehicle_service_baselines(vehicle_id,plan_service_id,company_service_id,last_service_mileage,last_service_date,source,created_by_user_id)
+                      VALUES(@v,@s,@cs,@km,@d,'ADMIN',@u)
+                      ON CONFLICT(vehicle_id,plan_service_id) DO UPDATE SET company_service_id=excluded.company_service_id,last_service_mileage=excluded.last_service_mileage,last_service_date=excluded.last_service_date,created_by_user_id=excluded.created_by_user_id,created_at=now()";
+            await using var cmd=new NpgsqlCommand(sql,con);cmd.Parameters.AddWithValue("v",vehicleId);cmd.Parameters.AddWithValue("s",req.PlanServiceId);cmd.Parameters.AddWithValue("cs",(object?)companyServiceId??DBNull.Value);cmd.Parameters.AddWithValue("km",(object?)req.LastServiceMileage??DBNull.Value);cmd.Parameters.AddWithValue("d",(object?)req.LastServiceDate?.Date??DBNull.Value);cmd.Parameters.AddWithValue("u",userId);await cmd.ExecuteNonQueryAsync();
             return Results.Ok(new{success=true});
         }).RequireAuthorization();
 
@@ -34,10 +35,17 @@ public static class MaintenanceEndpoints
                 LEFT JOIN maintenance_plan_versions pv ON pv.id=a.plan_version_id
                 LEFT JOIN maintenance_plans mp ON mp.id=pv.maintenance_plan_id
                 WHERE v.id=@v AND v.company_id=@c",con)){vc.Parameters.AddWithValue("v",vehicleId);vc.Parameters.AddWithValue("c",companyId);await using var vr=await vc.ExecuteReaderAsync();if(!await vr.ReadAsync())return Results.NotFound();currentMileage=vr.GetInt32(0);plate=vr.GetString(1);individualServices=vr.GetBoolean(2);}
-            var sql=@"SELECT s.id,s.name,s.category,s.specification,s.interval_km,s.interval_months,s.prealert_km,s.prealert_days,b.last_service_mileage,b.last_service_date
+            // El baseline se busca primero por coincidencia exacta de plan_service_id (comportamiento clásico) y,
+            // si no hay, por company_service_id — así el "último servicio" no se pierde al reasignar el vehículo
+            // a otro plan que reutiliza el mismo servicio del catálogo.
+            var sql=@"SELECT s.id,s.name,s.category,s.specification,s.interval_km,s.interval_months,s.prealert_km,s.prealert_days,bl.last_service_mileage,bl.last_service_date
                       FROM vehicle_plan_assignments a
                       JOIN maintenance_plan_services s ON s.plan_version_id=a.plan_version_id AND s.active=true
-                      LEFT JOIN vehicle_service_baselines b ON b.vehicle_id=a.vehicle_id AND b.plan_service_id=s.id
+                      LEFT JOIN LATERAL (
+                        SELECT b.last_service_mileage,b.last_service_date FROM vehicle_service_baselines b
+                        WHERE b.vehicle_id=a.vehicle_id AND (b.plan_service_id=s.id OR (s.company_service_id IS NOT NULL AND b.company_service_id=s.company_service_id))
+                        ORDER BY (b.plan_service_id=s.id) DESC, b.created_at DESC LIMIT 1
+                      ) bl ON true
                       WHERE a.vehicle_id=@v AND a.active=true ORDER BY s.sort_order,s.name";
             await using var cmd=new NpgsqlCommand(sql,con);cmd.Parameters.AddWithValue("v",vehicleId);await using var r=await cmd.ExecuteReaderAsync();
             var items=new List<MaintenanceStatusItem>();
@@ -61,11 +69,15 @@ public static class MaintenanceEndpoints
 
             var sql=@"SELECT v.id,v.plate,v.internal_number,v.brand,v.model,v.variant,v.current_mileage,
                              s.id,s.name,s.interval_km,s.interval_months,s.prealert_km,s.prealert_days,
-                             b.last_service_mileage,b.last_service_date
+                             bl.last_service_mileage,bl.last_service_date
                       FROM vehicles v
                       LEFT JOIN vehicle_plan_assignments a ON a.vehicle_id=v.id AND a.active=true
                       LEFT JOIN maintenance_plan_services s ON s.plan_version_id=a.plan_version_id AND s.active=true
-                      LEFT JOIN vehicle_service_baselines b ON b.vehicle_id=v.id AND b.plan_service_id=s.id
+                      LEFT JOIN LATERAL (
+                        SELECT b.last_service_mileage,b.last_service_date FROM vehicle_service_baselines b
+                        WHERE s.id IS NOT NULL AND b.vehicle_id=v.id AND (b.plan_service_id=s.id OR (s.company_service_id IS NOT NULL AND b.company_service_id=s.company_service_id))
+                        ORDER BY (b.plan_service_id=s.id) DESC, b.created_at DESC LIMIT 1
+                      ) bl ON true
                       WHERE v.company_id=@c AND v.status='ACTIVE'
                       ORDER BY v.plate,s.sort_order,s.name";
             await using var cmd=new NpgsqlCommand(sql,con);cmd.Parameters.AddWithValue("c",companyId);
@@ -199,14 +211,14 @@ public static class MaintenanceEndpoints
                 {h.Parameters.AddWithValue("id",recordId);h.Parameters.AddWithValue("c",companyId);h.Parameters.AddWithValue("v",vehicleId);h.Parameters.AddWithValue("u",userId);h.Parameters.AddWithValue("d",req.ServiceDate.Date);h.Parameters.AddWithValue("km",req.Mileage);h.Parameters.AddWithValue("n",(object?)req.Notes??DBNull.Value);await h.ExecuteNonQueryAsync();}
                 foreach(var serviceId in req.ServiceIds.Distinct())
                 {
-                    string name; string? spec; int? intervalKm; int? intervalMonths;
-                    await using(var sc=new NpgsqlCommand(@"SELECT s.name,s.specification,s.interval_km,s.interval_months FROM maintenance_plan_services s JOIN vehicle_plan_assignments a ON a.plan_version_id=s.plan_version_id AND a.active=true WHERE a.vehicle_id=@v AND s.id=@s AND s.active=true",con,tx))
-                    {sc.Parameters.AddWithValue("v",vehicleId);sc.Parameters.AddWithValue("s",serviceId);await using var r=await sc.ExecuteReaderAsync();if(!await r.ReadAsync()){await tx.RollbackAsync();return Results.BadRequest(new{success=false,error=new{code="INVALID_SERVICE",message="Uno de los servicios no pertenece al plan activo del vehículo."}});}name=r.GetString(0);spec=r.IsDBNull(1)?null:r.GetString(1);intervalKm=r.IsDBNull(2)?null:r.GetInt32(2);intervalMonths=r.IsDBNull(3)?null:r.GetInt32(3);}
+                    string name; string? spec; int? intervalKm; int? intervalMonths; Guid? companyServiceId;
+                    await using(var sc=new NpgsqlCommand(@"SELECT s.name,s.specification,s.interval_km,s.interval_months,s.company_service_id FROM maintenance_plan_services s JOIN vehicle_plan_assignments a ON a.plan_version_id=s.plan_version_id AND a.active=true WHERE a.vehicle_id=@v AND s.id=@s AND s.active=true",con,tx))
+                    {sc.Parameters.AddWithValue("v",vehicleId);sc.Parameters.AddWithValue("s",serviceId);await using var r=await sc.ExecuteReaderAsync();if(!await r.ReadAsync()){await tx.RollbackAsync();return Results.BadRequest(new{success=false,error=new{code="INVALID_SERVICE",message="Uno de los servicios no pertenece al plan activo del vehículo."}});}name=r.GetString(0);spec=r.IsDBNull(1)?null:r.GetString(1);intervalKm=r.IsDBNull(2)?null:r.GetInt32(2);intervalMonths=r.IsDBNull(3)?null:r.GetInt32(3);companyServiceId=r.IsDBNull(4)?(Guid?)null:r.GetGuid(4);}
                     int? nextKm=intervalKm.HasValue?req.Mileage+intervalKm.Value:null; DateTime? nextDate=intervalMonths.HasValue?req.ServiceDate.Date.AddMonths(intervalMonths.Value):null;
-                    await using(var it=new NpgsqlCommand(@"INSERT INTO maintenance_record_items(maintenance_record_id,plan_service_id,service_name_snapshot,specification_snapshot,interval_km_snapshot,interval_months_snapshot,next_due_mileage,next_due_date) VALUES(@r,@s,@n,@sp,@ik,@im,@nk,@nd)",con,tx))
-                    {it.Parameters.AddWithValue("r",recordId);it.Parameters.AddWithValue("s",serviceId);it.Parameters.AddWithValue("n",name);it.Parameters.AddWithValue("sp",(object?)spec??DBNull.Value);it.Parameters.AddWithValue("ik",(object?)intervalKm??DBNull.Value);it.Parameters.AddWithValue("im",(object?)intervalMonths??DBNull.Value);it.Parameters.AddWithValue("nk",(object?)nextKm??DBNull.Value);it.Parameters.AddWithValue("nd",(object?)nextDate?.Date??DBNull.Value);await it.ExecuteNonQueryAsync();}
-                    await using(var b=new NpgsqlCommand(@"INSERT INTO vehicle_service_baselines(vehicle_id,plan_service_id,last_service_mileage,last_service_date,source,created_by_user_id) VALUES(@v,@s,@km,@d,'MAINTENANCE',@u) ON CONFLICT(vehicle_id,plan_service_id) DO UPDATE SET last_service_mileage=excluded.last_service_mileage,last_service_date=excluded.last_service_date,source='MAINTENANCE',created_by_user_id=excluded.created_by_user_id,created_at=now()",con,tx))
-                    {b.Parameters.AddWithValue("v",vehicleId);b.Parameters.AddWithValue("s",serviceId);b.Parameters.AddWithValue("km",req.Mileage);b.Parameters.AddWithValue("d",req.ServiceDate.Date);b.Parameters.AddWithValue("u",userId);await b.ExecuteNonQueryAsync();}
+                    await using(var it=new NpgsqlCommand(@"INSERT INTO maintenance_record_items(maintenance_record_id,plan_service_id,company_service_id,service_name_snapshot,specification_snapshot,interval_km_snapshot,interval_months_snapshot,next_due_mileage,next_due_date) VALUES(@r,@s,@cs,@n,@sp,@ik,@im,@nk,@nd)",con,tx))
+                    {it.Parameters.AddWithValue("r",recordId);it.Parameters.AddWithValue("s",serviceId);it.Parameters.AddWithValue("cs",(object?)companyServiceId??DBNull.Value);it.Parameters.AddWithValue("n",name);it.Parameters.AddWithValue("sp",(object?)spec??DBNull.Value);it.Parameters.AddWithValue("ik",(object?)intervalKm??DBNull.Value);it.Parameters.AddWithValue("im",(object?)intervalMonths??DBNull.Value);it.Parameters.AddWithValue("nk",(object?)nextKm??DBNull.Value);it.Parameters.AddWithValue("nd",(object?)nextDate?.Date??DBNull.Value);await it.ExecuteNonQueryAsync();}
+                    await using(var b=new NpgsqlCommand(@"INSERT INTO vehicle_service_baselines(vehicle_id,plan_service_id,company_service_id,last_service_mileage,last_service_date,source,created_by_user_id) VALUES(@v,@s,@cs,@km,@d,'MAINTENANCE',@u) ON CONFLICT(vehicle_id,plan_service_id) DO UPDATE SET company_service_id=excluded.company_service_id,last_service_mileage=excluded.last_service_mileage,last_service_date=excluded.last_service_date,source='MAINTENANCE',created_by_user_id=excluded.created_by_user_id,created_at=now()",con,tx))
+                    {b.Parameters.AddWithValue("v",vehicleId);b.Parameters.AddWithValue("s",serviceId);b.Parameters.AddWithValue("cs",(object?)companyServiceId??DBNull.Value);b.Parameters.AddWithValue("km",req.Mileage);b.Parameters.AddWithValue("d",req.ServiceDate.Date);b.Parameters.AddWithValue("u",userId);await b.ExecuteNonQueryAsync();}
                 }
                 if(req.Mileage>currentMileage)
                 {

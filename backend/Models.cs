@@ -21,6 +21,8 @@ record CreatePlanRequest(string Name,string Brand,string Model,string? Variant);
 record UpdatePlanRequest(string Name,string Brand,string Model);
 record CreateServiceRequest(string Name,string Category,string? Specification,int? IntervalKm,int? IntervalMonths,int? PrealertKm,int? PrealertDays);
 record UpdateServiceRequest(string Name,string? Specification,int? IntervalKm,int? IntervalMonths,int? PrealertKm,int? PrealertDays);
+record CreateCompanyServiceRequest(string Name,string Category,string? Specification,int? DefaultIntervalKm,int? DefaultIntervalMonths,int? DefaultPrealertKm,int? DefaultPrealertDays);
+record UpdateCompanyServiceRequest(string Name,string Category,string? Specification,int? DefaultIntervalKm,int? DefaultIntervalMonths,int? DefaultPrealertKm,int? DefaultPrealertDays);
 record AssignPlanRequest(Guid PlanVersionId);
 record BaselineRequest(Guid PlanServiceId,int? LastServiceMileage,DateTime? LastServiceDate);
 record RegisterMaintenanceRequest(int Mileage,DateTime ServiceDate,List<Guid> ServiceIds,string? Notes,bool ExceptionConfirmed=false);

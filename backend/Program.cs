@@ -88,6 +88,7 @@ await EnsureV6Schema(connectionString);
 await EnsureV12Schema(connectionString);
 await EnsureV30Schema(connectionString);
 await EnsureV31IndividualServicesSchema(connectionString);
+await EnsureV32ServiceCatalogSchema(connectionString);
 await EnsureDemoData(connectionString);
 
 app.MapGet("/api/v1/health", () => Results.Ok(new { success = true, service = "AutoControlQR.Api", version = "v31.6" }));
@@ -99,6 +100,7 @@ app.MapUserEndpoints(connectionString);
 app.MapTechnicianEndpoints(connectionString, jwtKey);
 app.MapVehicleEndpoints(connectionString);
 app.MapPlanEndpoints(connectionString);
+app.MapServiceCatalogEndpoints(connectionString);
 app.MapMaintenanceEndpoints(connectionString);
 app.MapReportEndpoints(connectionString);
 app.MapPublicEndpoints(connectionString, publicWebBaseUrl);

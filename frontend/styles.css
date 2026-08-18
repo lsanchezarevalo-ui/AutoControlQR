@@ -83,6 +83,19 @@
 .vehicle-search-prominent input{border:0;padding:2px 0;font-size:1.05rem;font-weight:600;flex:1;background:transparent;min-width:0}
 .vehicle-search-prominent input:focus{outline:none}
 
+/* V32 catálogo de servicios */
+.service-catalog-page-head{margin-bottom:10px}.service-catalog-create-title{margin:20px 0 8px}.service-catalog-create-title h2{margin:0 0 4px}.service-catalog-create-title p{margin:0}
+.service-catalog-create-grid{display:grid;grid-template-columns:1.3fr 1fr;gap:12px 14px;align-items:end;margin-top:14px;background:#fff;border:1px solid var(--line-strong);border-radius:14px;padding:16px}
+.service-catalog-create-grid label{margin:0}.service-catalog-create-action{grid-column:1/-1;display:flex}.service-catalog-create-action button{min-height:46px;width:100%}
+.service-catalog-list-head{display:flex;align-items:center;justify-content:space-between;margin:24px 2px 10px}.service-catalog-list-head h2{font-size:1rem;color:var(--muted);margin:0}
+.service-catalog-search{width:min(340px,100%)}.service-catalog-list{display:grid;gap:10px}
+.service-catalog-card{display:flex;justify-content:space-between;align-items:center;gap:18px;padding:16px 18px;background:#fff;border:1px solid var(--line-strong);border-radius:14px}
+.service-catalog-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.service-catalog-meta{display:flex;gap:12px;flex-wrap:wrap;margin-top:6px;color:var(--muted);font-size:.85rem;font-weight:700}
+.service-catalog-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;flex:0 0 auto}
+@media(max-width:800px){.service-catalog-page-head{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:12px!important}#showArchivedServices{position:static!important;justify-self:start!important;width:auto!important;max-width:100%!important;margin:0!important;white-space:nowrap!important}}
+@media(max-width:650px){.service-catalog-create-grid{grid-template-columns:1fr}.service-catalog-list-head{align-items:stretch;flex-direction:column;gap:10px}.service-catalog-search{width:100%}.service-catalog-card{align-items:stretch;flex-direction:column}.service-catalog-actions{display:grid;grid-template-columns:1fr 1fr}.service-catalog-actions button{width:100%}}
+
 /* V32 menú rápido móvil (Vehículos / Planes) */
 .quick-menu-head{margin-bottom:16px}
 .quick-menu{display:grid;gap:12px}
