@@ -73,8 +73,15 @@ function renderPlans(plans,vehicles=[],action=null){
 }
 function planCard(p){return `<article class="planrow plan-card"><div class="plan-info"><div class="plan-title"><strong>${esc(p.name)}</strong><span class="plan-version">V${p.versionNumber}</span></div><span class="plan-model">${esc(p.brand)} ${esc(p.model)}</span></div><div class="plan-actions"><button class="showservices secondary" data-version="${p.versionId}" data-name="${esc(p.name)}">Servicios</button><button class="servicebtn" data-version="${p.versionId}" data-name="${esc(p.name)}">+ Agregar servicio</button><button class="editplan textbtn" data-plan="${p.id}">Editar</button><button class="archiveplan textbtn dangertext" data-plan="${p.id}" data-name="${esc(p.name)}">Archivar</button></div></article>`}
 
-function serviceIntervalFields({name='',interval='',pre='0',spec=''}={},catalog=[]){
- return `<label>Servicio<input name="name" list="serviceCatalogDatalist" value="${esc(name)}" placeholder="Ej. Aceite de motor" required autocomplete="off"></label><datalist id="serviceCatalogDatalist">${catalog.map(s=>`<option value="${esc(s.name)}"></option>`).join('')}</datalist><div class="service-interval-grid"><label>Intervalo por kilometraje<input name="interval" class="integer-km" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="Ej. 10000" value="${esc(String(interval))}" required></label><label>Prealerta<input name="pre" class="integer-km" type="text" inputmode="numeric" pattern="[0-9]*" value="${esc(String(pre))}"></label></div><label>Especificación <small class="optional-label">Opcional</small><input name="spec" value="${esc(spec)}" placeholder="Ej. 5W-30"></label>`
+function serviceIntervalFields({name='',interval='',pre='0',spec=''}={},catalog=[],catalogOnly=false){
+ let nameField;
+ if(catalogOnly){
+  const names=catalog.map(s=>s.name);if(name && !names.includes(name))names.unshift(name);
+  nameField=`<label>Servicio<select name="name" required><option value="">Selecciona un servicio del catálogo…</option>${names.map(n=>`<option value="${esc(n)}" ${n===name?'selected':''}>${esc(n)}</option>`).join('')}</select><small class="muted">¿No está en la lista? Créalo primero en Servicios.</small></label>`;
+ }else{
+  nameField=`<label>Servicio<input name="name" list="serviceCatalogDatalist" value="${esc(name)}" placeholder="Ej. Aceite de motor" required autocomplete="off"></label><datalist id="serviceCatalogDatalist">${catalog.map(s=>`<option value="${esc(s.name)}"></option>`).join('')}</datalist>`;
+ }
+ return `${nameField}<div class="service-interval-grid"><label>Intervalo por kilometraje<input name="interval" class="integer-km" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="Ej. 10000" value="${esc(String(interval))}" required></label><label>Prealerta<input name="pre" class="integer-km" type="text" inputmode="numeric" pattern="[0-9]*" value="${esc(String(pre))}"></label></div><label>Especificación <small class="optional-label">Opcional</small><input name="spec" value="${esc(spec)}" placeholder="Ej. 5W-30"></label>`
 }
 function wireServiceCatalogAutofill(wrap,catalog){
  const nameInput=wrap.querySelector('[name="name"]');if(!nameInput)return;
@@ -88,9 +95,10 @@ function wireServiceCatalogAutofill(wrap,catalog){
 }
 async function addService(versionId,planName='Plan'){
  const catOut=await req(api+'/service-catalog'),catalog=catOut.r&&catOut.r.ok?(catOut.j.data||[]):[];
+ if(!catalog.length)return alert('Todavía no tienes servicios en el catálogo.\n\nVe a "Servicios" en el menú y crea al menos uno antes de agregarlo a un plan.');
  const wrap=openFormModal({
   title:`Agregar servicio · ${planName}`,
-  body:`${serviceIntervalFields({interval:'',pre:'1000'},catalog)}<p class="muted">Ejemplo: intervalo 10.000 km y prealerta 1.000 km avisará cuando falten 1.000 km para el servicio.</p>`,
+  body:`${serviceIntervalFields({interval:'',pre:'1000'},catalog,true)}<p class="muted">Ejemplo: intervalo 10.000 km y prealerta 1.000 km avisará cuando falten 1.000 km para el servicio.</p>`,
   onSubmit:async(f,err)=>{
    const interval=Number(String(f.get('interval')).replace(/\D/g,'')),pre=Number(String(f.get('pre')||'0').replace(/\D/g,''));
    if(!interval){err.textContent='Ingresa un intervalo de kilometraje válido.';return false}
@@ -117,7 +125,7 @@ async function editService(versionId,planName,service){
  const catOut=await req(api+'/service-catalog'),catalog=catOut.r&&catOut.r.ok?(catOut.j.data||[]):[];
  const wrap=openFormModal({
   title:`Editar servicio · ${service.name}`,
-  body:`${serviceIntervalFields({name:service.name,interval:service.intervalKm??'',pre:service.prealertKm??0,spec:service.specification||''},catalog)}<p class="muted">Este cambio modifica la configuración futura del plan. Los mantenimientos ya registrados conservan los datos históricos con los que fueron ejecutados.</p>`,
+  body:`${serviceIntervalFields({name:service.name,interval:service.intervalKm??'',pre:service.prealertKm??0,spec:service.specification||''},catalog,true)}<p class="muted">Este cambio modifica la configuración futura del plan. Los mantenimientos ya registrados conservan los datos históricos con los que fueron ejecutados.</p>`,
   onSubmit:async(f,err)=>{
     const interval=Number(String(f.get('interval')).replace(/\D/g,'')),pre=Number(String(f.get('pre')||'0').replace(/\D/g,''));
     if(!interval){err.textContent='Ingresa un intervalo de kilometraje válido.';return false}
