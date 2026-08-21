@@ -65,13 +65,13 @@ internal static class Helpers
     public static object ServiceObject(NpgsqlDataReader r) => new {id=r.GetGuid(0),name=r.GetString(1),category=r.GetString(2),specification=r.IsDBNull(3)?null:r.GetString(3),intervalKm=r.IsDBNull(4)?(int?)null:r.GetInt32(4),intervalMonths=r.IsDBNull(5)?(int?)null:r.GetInt32(5),prealertKm=r.IsDBNull(6)?(int?)null:r.GetInt32(6),prealertDays=r.IsDBNull(7)?(int?)null:r.GetInt32(7)};
     public static MaintenanceStatusItem CalcStatus(Guid id,string name,int currentMileage,int? intervalKm,int? intervalMonths,int prealertKm,int prealertDays,int? lastKm,DateTime? lastDate)
     {
-        if(lastKm is null && lastDate is null) return new(id,name,"NO_BASELINE",null,null,null,null);
+        if(lastKm is null && lastDate is null) return new(id,name,"NO_BASELINE",null,null,null,null,lastKm,lastDate);
         int? nextKm = intervalKm.HasValue && lastKm.HasValue ? lastKm.Value + intervalKm.Value : null;
         DateTime? nextDate = intervalMonths.HasValue && lastDate.HasValue ? lastDate.Value.Date.AddMonths(intervalMonths.Value) : null;
         int? remainingKm = nextKm.HasValue ? nextKm.Value-currentMileage : null;
         int? remainingDays = nextDate.HasValue ? (nextDate.Value.Date-DateTime.UtcNow.Date).Days : null;
         var overdue=(remainingKm.HasValue && remainingKm.Value<=0)||(remainingDays.HasValue && remainingDays.Value<=0);
         var soon=!overdue && ((remainingKm.HasValue && remainingKm.Value<=prealertKm)||(remainingDays.HasValue && remainingDays.Value<=prealertDays));
-        return new(id,name,overdue?"OVERDUE":soon?"DUE_SOON":"UP_TO_DATE",nextKm,nextDate,remainingKm,remainingDays);
+        return new(id,name,overdue?"OVERDUE":soon?"DUE_SOON":"UP_TO_DATE",nextKm,nextDate,remainingKm,remainingDays,lastKm,lastDate);
     }
 }

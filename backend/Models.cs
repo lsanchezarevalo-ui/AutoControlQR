@@ -26,7 +26,7 @@ record UpdateCompanyServiceRequest(string Name,string Category,string? Specifica
 record AssignPlanRequest(Guid PlanVersionId);
 record BaselineRequest(Guid PlanServiceId,int? LastServiceMileage,DateTime? LastServiceDate);
 record RegisterMaintenanceRequest(int Mileage,DateTime ServiceDate,List<Guid> ServiceIds,string? Notes,bool ExceptionConfirmed=false);
-record MaintenanceStatusItem(Guid ServiceId,string Name,string Status,int? NextDueMileage,DateTime? NextDueDate,int? RemainingKm,int? RemainingDays);
+record MaintenanceStatusItem(Guid ServiceId,string Name,string Status,int? NextDueMileage,DateTime? NextDueDate,int? RemainingKm,int? RemainingDays,int? LastServiceMileage,DateTime? LastServiceDate);
 
 record DashboardVehicle(Guid Id,string Plate,string? InternalNumber,string Brand,string Model,string? Variant,int CurrentMileage,List<MaintenanceStatusItem> Services);
 record DashboardPriority(Guid VehicleId,string Plate,string? InternalNumber,string Brand,string Model,string? Variant,int CurrentMileage,Guid ServiceId,string ServiceName,string Status,int? NextDueMileage,int? RemainingKm,DateTime? NextDueDate,double? AverageKmPerDay,int? EstimatedDays,DateTime? EstimatedDate,int PredictionSampleDays);
