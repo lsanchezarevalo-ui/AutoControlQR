@@ -28,13 +28,13 @@ public static class MaintenanceEndpoints
             if(!CanAccessVehicle(principal,vehicleId))return Results.Forbid();
             var companyId=CompanyId(principal);
             await using var con=new NpgsqlConnection(connectionString);await con.OpenAsync();
-            int currentMileage; string plate; bool individualServices=false;
-            await using(var vc=new NpgsqlCommand(@"SELECT v.current_mileage,v.plate,COALESCE(mp.is_vehicle_specific,false)
+            int currentMileage; string plate; string? internalNumber; bool individualServices=false;
+            await using(var vc=new NpgsqlCommand(@"SELECT v.current_mileage,v.plate,COALESCE(mp.is_vehicle_specific,false),v.internal_number
                 FROM vehicles v
                 LEFT JOIN vehicle_plan_assignments a ON a.vehicle_id=v.id AND a.active=true
                 LEFT JOIN maintenance_plan_versions pv ON pv.id=a.plan_version_id
                 LEFT JOIN maintenance_plans mp ON mp.id=pv.maintenance_plan_id
-                WHERE v.id=@v AND v.company_id=@c",con)){vc.Parameters.AddWithValue("v",vehicleId);vc.Parameters.AddWithValue("c",companyId);await using var vr=await vc.ExecuteReaderAsync();if(!await vr.ReadAsync())return Results.NotFound();currentMileage=vr.GetInt32(0);plate=vr.GetString(1);individualServices=vr.GetBoolean(2);}
+                WHERE v.id=@v AND v.company_id=@c",con)){vc.Parameters.AddWithValue("v",vehicleId);vc.Parameters.AddWithValue("c",companyId);await using var vr=await vc.ExecuteReaderAsync();if(!await vr.ReadAsync())return Results.NotFound();currentMileage=vr.GetInt32(0);plate=vr.GetString(1);individualServices=vr.GetBoolean(2);internalNumber=vr.IsDBNull(3)?null:vr.GetString(3);}
             // El baseline se busca primero por coincidencia exacta de plan_service_id (comportamiento clásico) y,
             // si no hay, por company_service_id — así el "último servicio" no se pierde al reasignar el vehículo
             // a otro plan que reutiliza el mismo servicio del catálogo.
@@ -54,10 +54,10 @@ public static class MaintenanceEndpoints
                 var serviceId=r.GetGuid(0);var name=r.GetString(1);var intervalKm=r.IsDBNull(4)?(int?)null:r.GetInt32(4);var intervalMonths=r.IsDBNull(5)?(int?)null:r.GetInt32(5);var prealertKm=r.IsDBNull(6)?0:r.GetInt32(6);var prealertDays=r.IsDBNull(7)?0:r.GetInt32(7);var lastKm=r.IsDBNull(8)?(int?)null:r.GetInt32(8);var lastDate=r.IsDBNull(9)?(DateTime?)null:r.GetDateTime(9);
                 items.Add(CalcStatus(serviceId,name,currentMileage,intervalKm,intervalMonths,prealertKm,prealertDays,lastKm,lastDate));
             }
-            if(items.Count==0) return Results.Ok(new{success=true,data=new{plate,currentMileage,overallStatus="NO_PLAN",hasIncompleteHistory=false,individualServices,services=items}});
+            if(items.Count==0) return Results.Ok(new{success=true,data=new{plate,internalNumber,currentMileage,overallStatus="NO_PLAN",hasIncompleteHistory=false,individualServices,services=items}});
             var overall=items.Any(x=>x.Status=="OVERDUE")?"OVERDUE":items.Any(x=>x.Status=="DUE_SOON")?"DUE_SOON":items.All(x=>x.Status=="NO_BASELINE")?"NO_BASELINE":"UP_TO_DATE";
             var incomplete=items.Any(x=>x.Status=="NO_BASELINE");
-            return Results.Ok(new{success=true,data=new{plate,currentMileage,overallStatus=overall,hasIncompleteHistory=incomplete,individualServices,services=items}});
+            return Results.Ok(new{success=true,data=new{plate,internalNumber,currentMileage,overallStatus=overall,hasIncompleteHistory=incomplete,individualServices,services=items}});
         }).RequireAuthorization();
 
         // CENTRO DE CONTROL + PREDICCIÓN V8
