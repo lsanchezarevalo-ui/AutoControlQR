@@ -1,6 +1,6 @@
 # AutoControl QR — Infraestructura, ubicaciones y respaldo
 
-Documento de referencia con todo lo necesario para recuperar, respaldar o asegurar este proyecto. Última actualización: 2026-08-22.
+Documento de referencia con todo lo necesario para recuperar, respaldar o asegurar este proyecto. Última actualización: 2026-08-22 (segunda revisión — repo remoto y respaldos ya resueltos).
 
 ## 1. Qué es
 
@@ -9,7 +9,8 @@ AutoControl QR: SaaS de control de mantenimiento vehicular con QR, multiempresa.
 ## 2. Ubicación del código
 
 - **Carpeta local (tu Mac):** `/Users/luismiguelsanchez/Desktop/Prueba Autocontrol`
-- **Control de versiones:** Git local, rama `main`, 18 commits. **No tiene remoto configurado** (ni GitHub, ni GitLab, ni ningún backup fuera de tu Mac). Ver sección 7, gap #1.
+- **Control de versiones:** Git, rama `main`, 20 commits. **Remoto privado:** [github.com/lsanchezarevalo-ui/AutoControlQR](https://github.com/lsanchezarevalo-ui/AutoControlQR) (privado). El código ya está respaldado fuera de tu Mac. Acceso vía SSH con la llave `~/.ssh/id_ed25519` (la misma que usas para el servidor; su clave pública está agregada en GitHub → Settings → SSH and GPG keys).
+  - Para subir cambios futuros: `git push` (puede requerir tu confirmación explícita cada vez, según el modo de permisos activo).
 - **Documentos de trabajo** (no forman parte del código, no se despliegan): `Sugiero hacer los siguientes cambios.docx`, `Mejora 2.docx`, y similares en el Escritorio — son tus notas, excluidos del repo.
 
 ### Estructura de carpetas
@@ -99,26 +100,23 @@ ssh root@67.205.190.114 "cd /root/AutoControlQR_runnable_v31_6 && docker compose
 curl -I https://app.autocontrolqr.com/
 ```
 
-## 6. Respaldos — estado actual y **el hueco importante**
+## 6. Respaldos
 
-- `scripts/prod-backup.sh` genera un `.dump` de PostgreSQL en `/root/AutoControlQR_runnable_v31_6/backups/` en el servidor.
-- Hay 11 respaldos ahí ahora mismo, el más reciente de hoy.
+- `scripts/prod-backup.sh` genera un `.dump` de PostgreSQL en `/root/AutoControlQR_runnable_v31_6/backups/` en el servidor, y borra automáticamente los de más de 30 días.
+- **Cron diario a las 3am** (hora del servidor) ejecuta este script solo, sin intervención manual. Log en `backups/backup.log`.
+- `scripts/pull-backups.sh` baja con un solo comando los `.dump` del servidor a `~/Backups/autocontrolqr/` en tu Mac — este es el respaldo que realmente vive fuera del servidor.
 - `scripts/restore.sh` permite restaurar desde un `.dump` (pide confirmación explícita escribiendo "RESTAURAR").
 
-⚠️ **Gap real: los respaldos viven en el mismo servidor que los datos originales.** Si el droplet se pierde, se borra por error, o DigitalOcean tiene un problema, se pierden los datos **y** los respaldos al mismo tiempo. Esto NO es un respaldo real todavía — es solo una copia local en la misma máquina.
+✅ Resuelto: los respaldos ya no dependen únicamente del mismo servidor — corre `./scripts/pull-backups.sh` periódicamente (por ejemplo, cada vez que hagas un despliegue grande) para mantener la copia en tu Mac al día.
 
-⚠️ **Gap real #2: el código no tiene copia fuera de tu Mac.** Si tu computador falla, se pierden 18 commits de historial y el único checkout completo del proyecto (el servidor solo tiene los archivos desplegados, no el historial de git).
+## 7. Estado de las recomendaciones
 
-## 7. Recomendaciones concretas (en orden de importancia)
-
-1. **Sacar los respaldos de BD fuera del servidor.** Ejemplos simples:
-   - Descargar el `.dump` más reciente a tu Mac después de cada respaldo (`scp root@67.205.190.114:/root/AutoControlQR_runnable_v31_6/backups/*.dump ~/Backups/autocontrolqr/`), o
-   - Configurar un cron en el servidor que además suba cada `.dump` a un bucket (DigitalOcean Spaces, S3, Backblaze).
-2. **Subir el repositorio a un remoto privado** (GitHub o GitLab, repo privado). Con `git remote add origin <url> && git push -u origin main` basta. Esto te da historial fuera de tu Mac y la posibilidad de recuperar el código si tu computador falla.
-3. **Automatizar el respaldo** con un cron job en el servidor (ej. diario a las 3am) en vez de depender de que se ejecute manualmente antes de cada despliegue.
-4. **Limpiar volúmenes viejos sin uso** en el servidor: `autocontrolqr_runnable_v4_pgdata`, `autocontrolqr_runnable_v30_4_*`, `autocontrolqr_runnable_v31_3_*`, `autocontrolqr_runnable_v31_4_*` — restos de despliegues anteriores, no los usa ningún contenedor activo. No es urgente (hay 72 GB libres) pero conviene revisarlos y borrarlos si confirmas que no los necesitas.
-5. **Rotar `JWT_KEY`** periódicamente y después de cualquier sospecha de filtración (invalida todas las sesiones activas al cambiarla).
-6. **Guardar la passphrase de tu llave SSH** (`~/.ssh/id_ed25519`) en un gestor de contraseñas — es la única llave con acceso al servidor.
+1. ✅ **Respaldos de BD fuera del servidor** — resuelto. `~/Backups/autocontrolqr/` en tu Mac + `scripts/pull-backups.sh` para actualizarlo cuando quieras.
+2. ✅ **Repositorio remoto privado** — resuelto. Código en `github.com/lsanchezarevalo-ui/AutoControlQR` (privado).
+3. ✅ **Respaldo automatizado** — resuelto. Cron diario a las 3am en el servidor.
+4. ✅ **Limpieza de volúmenes viejos** — resuelto. Se eliminaron 10 volúmenes huérfanos (`v4`, `v30_4`, `v31_3`, `v31_4`); solo quedan los 3 que usan los contenedores activos.
+5. ⏳ **Rotar `JWT_KEY`** — pendiente, a criterio tuyo. Invalida todas las sesiones activas al hacerlo, así que conviene avisar a los usuarios antes.
+6. ⏳ **Guardar la passphrase de tu llave SSH** (`~/.ssh/id_ed25519`) en un gestor de contraseñas — acción personal tuya, es la única llave con acceso al servidor y ahora también a GitHub.
 
 ## 8. Contacto/plataforma
 
