@@ -8,3 +8,6 @@ docker compose --env-file .env.production -f docker-compose.prod.yml exec -T pos
   pg_dump -U autocontrolqr -d autocontrolqr -Fc --no-owner --no-acl > "$FILE"
 test -s "$FILE"
 echo "✓ Respaldo: $FILE"
+
+# Conserva solo los últimos 30 días de respaldos locales (el respaldo real vive fuera del servidor).
+find backups -name "autocontrolqr_prod_*.dump" -mtime +30 -delete
