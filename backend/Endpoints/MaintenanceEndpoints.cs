@@ -199,12 +199,29 @@ public static class MaintenanceEndpoints
                 int currentMileage; int threshold;
                 await using(var vc=new NpgsqlCommand("SELECT v.current_mileage,c.exceptional_mileage_threshold FROM vehicles v JOIN companies c ON c.id=v.company_id WHERE v.id=@v AND v.company_id=@c FOR UPDATE OF v",con,tx))
                 {vc.Parameters.AddWithValue("v",vehicleId);vc.Parameters.AddWithValue("c",companyId);await using var vr=await vc.ExecuteReaderAsync();if(!await vr.ReadAsync()){await tx.RollbackAsync();return Results.NotFound();}currentMileage=vr.GetInt32(0);threshold=vr.GetInt32(1);}
-                if(req.Mileage<currentMileage){await tx.RollbackAsync();return Results.UnprocessableEntity(new{success=false,error=new{code="MILEAGE_LOWER_THAN_CURRENT",message=$"El mantenimiento no puede registrarse por debajo del kilometraje actual ({currentMileage:N0} km)."}});}
-                var jump=req.Mileage-currentMileage;
-                if(jump>=threshold && !req.ExceptionConfirmed)
+                if(req.Mileage<currentMileage)
                 {
-                    await tx.RollbackAsync();
-                    return Results.Ok(new{success=true,data=new{status="CONFIRMATION_REQUIRED",previousMileage=currentMileage,newMileage=req.Mileage,difference=jump,threshold}});
+                    // Solo el administrador puede registrar un mantenimiento atrasado (por ejemplo, cuando el
+                    // técnico olvidó registrarlo a tiempo) — siempre con confirmación explícita.
+                    if(principal.FindFirstValue("role")!="COMPANY_ADMIN")
+                    {
+                        await tx.RollbackAsync();
+                        return Results.UnprocessableEntity(new{success=false,error=new{code="MILEAGE_LOWER_THAN_CURRENT",message=$"El mantenimiento no puede registrarse por debajo del kilometraje actual ({currentMileage:N0} km)."}});
+                    }
+                    if(!req.ExceptionConfirmed)
+                    {
+                        await tx.RollbackAsync();
+                        return Results.Ok(new{success=true,data=new{status="BELOW_CURRENT_CONFIRMATION_REQUIRED",previousMileage=currentMileage,newMileage=req.Mileage}});
+                    }
+                }
+                else
+                {
+                    var jump=req.Mileage-currentMileage;
+                    if(jump>=threshold && !req.ExceptionConfirmed)
+                    {
+                        await tx.RollbackAsync();
+                        return Results.Ok(new{success=true,data=new{status="CONFIRMATION_REQUIRED",previousMileage=currentMileage,newMileage=req.Mileage,difference=jump,threshold}});
+                    }
                 }
                 var recordId=Guid.NewGuid();
                 await using(var h=new NpgsqlCommand("INSERT INTO maintenance_records(id,company_id,vehicle_id,technician_user_id,service_date,mileage,notes) VALUES(@id,@c,@v,@u,@d,@km,@n)",con,tx))
@@ -217,7 +234,10 @@ public static class MaintenanceEndpoints
                     int? nextKm=intervalKm.HasValue?req.Mileage+intervalKm.Value:null; DateTime? nextDate=intervalMonths.HasValue?req.ServiceDate.Date.AddMonths(intervalMonths.Value):null;
                     await using(var it=new NpgsqlCommand(@"INSERT INTO maintenance_record_items(maintenance_record_id,plan_service_id,company_service_id,service_name_snapshot,specification_snapshot,interval_km_snapshot,interval_months_snapshot,next_due_mileage,next_due_date) VALUES(@r,@s,@cs,@n,@sp,@ik,@im,@nk,@nd)",con,tx))
                     {it.Parameters.AddWithValue("r",recordId);it.Parameters.AddWithValue("s",serviceId);it.Parameters.AddWithValue("cs",(object?)companyServiceId??DBNull.Value);it.Parameters.AddWithValue("n",name);it.Parameters.AddWithValue("sp",(object?)spec??DBNull.Value);it.Parameters.AddWithValue("ik",(object?)intervalKm??DBNull.Value);it.Parameters.AddWithValue("im",(object?)intervalMonths??DBNull.Value);it.Parameters.AddWithValue("nk",(object?)nextKm??DBNull.Value);it.Parameters.AddWithValue("nd",(object?)nextDate?.Date??DBNull.Value);await it.ExecuteNonQueryAsync();}
-                    await using(var b=new NpgsqlCommand(@"INSERT INTO vehicle_service_baselines(vehicle_id,plan_service_id,company_service_id,last_service_mileage,last_service_date,source,created_by_user_id) VALUES(@v,@s,@cs,@km,@d,'MAINTENANCE',@u) ON CONFLICT(vehicle_id,plan_service_id) DO UPDATE SET company_service_id=excluded.company_service_id,last_service_mileage=excluded.last_service_mileage,last_service_date=excluded.last_service_date,source='MAINTENANCE',created_by_user_id=excluded.created_by_user_id,created_at=now()",con,tx))
+                    // Si ya existe un baseline más reciente (por kilometraje) para este servicio, un registro
+                    // atrasado no debe retrocederlo — solo actualiza cuando es igual o más nuevo, o cuando no hay
+                    // baseline previo o previo sin kilometraje.
+                    await using(var b=new NpgsqlCommand(@"INSERT INTO vehicle_service_baselines(vehicle_id,plan_service_id,company_service_id,last_service_mileage,last_service_date,source,created_by_user_id) VALUES(@v,@s,@cs,@km,@d,'MAINTENANCE',@u) ON CONFLICT(vehicle_id,plan_service_id) DO UPDATE SET company_service_id=excluded.company_service_id,last_service_mileage=excluded.last_service_mileage,last_service_date=excluded.last_service_date,source='MAINTENANCE',created_by_user_id=excluded.created_by_user_id,created_at=now() WHERE vehicle_service_baselines.last_service_mileage IS NULL OR excluded.last_service_mileage IS NULL OR excluded.last_service_mileage>=vehicle_service_baselines.last_service_mileage",con,tx))
                     {b.Parameters.AddWithValue("v",vehicleId);b.Parameters.AddWithValue("s",serviceId);b.Parameters.AddWithValue("cs",(object?)companyServiceId??DBNull.Value);b.Parameters.AddWithValue("km",req.Mileage);b.Parameters.AddWithValue("d",req.ServiceDate.Date);b.Parameters.AddWithValue("u",userId);await b.ExecuteNonQueryAsync();}
                 }
                 if(req.Mileage>currentMileage)

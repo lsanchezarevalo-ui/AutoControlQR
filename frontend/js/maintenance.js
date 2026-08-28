@@ -30,14 +30,18 @@ async function addIndividualVehicleService(vehicleId){
 }
 
 async function registerMaintenance(vehicleId,currentMileage,serviceId,serviceName){
+ const isAdmin=(JSON.parse(localStorage.getItem('user')||'{}').role==='COMPANY_ADMIN');
  const wrap=openFormModal({
   title:`Registrar mantenimiento · ${serviceName}`,
-  body:`<label>Kilometraje<input name="km" type="number" min="${currentMileage}" value="${currentMileage}" required></label>${dateField('date','Fecha del servicio')}<label>Observaciones<textarea name="notes" rows="3" placeholder="Opcional"></textarea></label>`,
+  body:`<label>Kilometraje<input name="km" type="number" ${isAdmin?'':`min="${currentMileage}"`} value="${currentMileage}" required></label>${isAdmin?'<p class="muted">Como administrador puedes registrar un mantenimiento atrasado con un kilometraje menor al actual, por ejemplo si el técnico olvidó registrarlo a tiempo.</p>':''}${dateField('date','Fecha del servicio')}<label>Observaciones<textarea name="notes" rows="3" placeholder="Opcional"></textarea></label>`,
   onSubmit:async(f,err)=>{
    const km=Number(f.get('km')),date=f.get('date'),notes=f.get('notes')||null;
    let out=await req(`${api}/vehicles/${vehicleId}/maintenance`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mileage:km,serviceDate:date,serviceIds:[serviceId],notes,exceptionConfirmed:false})});
    if(out.j.data?.status==='CONFIRMATION_REQUIRED'){
      if(!confirm(`La lectura aumentó ${fmt(out.j.data.difference)} km desde el kilometraje actual.\n\n¿Confirmas que ${fmt(km)} km es correcto?`))return false;
+     out=await req(`${api}/vehicles/${vehicleId}/maintenance`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mileage:km,serviceDate:date,serviceIds:[serviceId],notes,exceptionConfirmed:true})});
+   }else if(out.j.data?.status==='BELOW_CURRENT_CONFIRMATION_REQUIRED'){
+     if(!confirm(`Estás registrando ${fmt(km)} km, por debajo del kilometraje actual del vehículo (${fmt(out.j.data.previousMileage)} km).\n\nUsa esto solo para registrar un mantenimiento atrasado. El kilometraje actual del vehículo NO se modificará.\n\n¿Confirmas que quieres registrarlo así?`))return false;
      out=await req(`${api}/vehicles/${vehicleId}/maintenance`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mileage:km,serviceDate:date,serviceIds:[serviceId],notes,exceptionConfirmed:true})});
    }
    if(!out.r||!out.r.ok){err.textContent=out.j.error?.message||'No se pudo registrar el mantenimiento.';return false}
